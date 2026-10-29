@@ -1,6 +1,6 @@
 # AI 职位搜索与自动投递系统
 
-当前已完成架构设计、第一步工程骨架及第二步 PostgreSQL 数据库层：22 张表、Alembic 迁移、事务与任务租约基础操作。尚未实现档案等业务 API、网页采集、AI 分析和真实投递。
+当前已完成架构设计、服务骨架、PostgreSQL 数据库层及第三步档案/简历/投递策略 API。可以录入真实技能、上传和下载简历、设置默认简历及维护匹配策略。BOSS直聘网页采集、AI 分析和真实投递尚未实现。
 
 目标：自动搜索 AI 相关职位，获取职位详情，分析与候选人技术栈的匹配度，并按配置自动投递真实简历。
 
@@ -31,7 +31,7 @@ uv run --locked python -m app
 - 健康检查：[GET /api/v1/health](http://127.0.0.1:8000/api/v1/health)，返回 `{"status":"ok"}`。
 - 接口文档：[Swagger UI](http://127.0.0.1:8000/docs)。
 - 每个请求返回 `X-Request-ID`，错误响应包含同一 request_id。
-- [GET /api/v1/ready](http://127.0.0.1:8000/api/v1/ready) 检查数据库连接和迁移版本；未配置或未就绪返回 503。存储将在接入后追加检查。
+- [GET /api/v1/ready](http://127.0.0.1:8000/api/v1/ready) 检查数据库连接、迁移版本及简历存储目录可写性；未配置或未就绪返回 503。
 
 配置读取优先级：显式初始化参数 > 系统环境变量 > 项目根目录 `.env` > 默认值。变量均带 `JOB_AGENT_` 前缀，见 [.env.example](.env.example)。端口、日志级别和环境名启动时校验，非法配置拒绝启动。第一步仅允许本机监听。
 
@@ -98,6 +98,48 @@ uv run --locked pytest -q
 请使用专用测试库，用户需要创建 schema 的权限。每项测试创建随机 `test_<uuid>` schema，结束时仅清理该 schema；未设置变量时跳过数据库集成测试。测试验证迁移往返、模型一致性、版本归属/不可变性、申请去重、事务回滚、跨账户并发额度、任务租约和数据库就绪检查。`TEST_DATABASE_URL` 需通过系统环境变量传入，不从 `.env` 自动加载。
 
 初始迁移不依赖当前模型执行 `create_all()`，后续修改模型不会改变历史迁移。实现参考：[SQLAlchemy 行锁](https://docs.sqlalchemy.org/en/20/core/selectable.html#sqlalchemy.sql.expression.Select.with_for_update)、[Alembic 离线 SQL](https://alembic.sqlalchemy.org/en/latest/offline.html)。
+
+## 录入档案、简历和策略（第三步）
+
+本机 `.env` 已生成 `JOB_AGENT_API_TOKEN`，请保留该值。新环境需自行生成至少 32 字符的随机令牌，填写方法见 `.env.example`；没有令牌时业务接口返回 503。令牌、简历文件及数据库密码不提交到 Git。
+
+启动服务后，打开 `/docs`，点击 **Authorize**，填写 `.env` 中令牌的值（不需要额外输入 Bearer），再按以下顺序操作：
+
+1. `POST /api/v1/profiles` 创建候选人档案。只填写真实技能与证据，缺失信息保持空值。
+2. `POST /api/v1/profiles/{profile_id}/resumes` 选择 PDF/DOCX 上传。响应中返回 resume id 与 artifact id。
+3. `PUT /api/v1/profiles/{profile_id}/default-resume` 用 resume id 指定默认简历。上传不会自动更换默认简历。
+4. `POST /api/v1/policies` 创建策略。默认 BOSS直聘（平台标识 `boss`）、匹配度 ≥70、每日 20 份、自动投递关闭；本阶段没有投递执行器，开启该字段也不会触发真实投递。
+
+档案请求示例（示意内容需替换为真实情况）：
+
+```json
+{
+  "name": "你的姓名",
+  "skills": [
+    {
+      "canonical_name": "Python",
+      "level": "proficient",
+      "evidence": "填写你实际完成的项目与承担的工作",
+      "years": "2.00"
+    }
+  ],
+  "experience_years": "2.00",
+  "education": {"degree": "本科"},
+  "preferred_cities": ["上海"],
+  "remote_preference": "any",
+  "facts": {}
+}
+```
+
+`GET /profiles`、`GET /policies`、`GET /profiles/{id}/resumes` 提供 cursor 分页。GET 档案/策略会返回 `ETag`；更新用完整请求体并携带 `If-Match`（如 `"1"`），冲突返回 409。每次修改追加不可变版本，已有分析使用的旧版本保持不变。分数与年限等 Decimal 字段以十进制字符串返回。
+
+简历最多 10 MiB，检查扩展名、MIME 和内部结构；PDF 需非加密且为 1–100 页，DOCX 检查包结构并限制解压总大小。整个写请求不能超过 12 MiB。文件按随机名称保存到 `artifacts/resumes/`，不直接使用上传路径；原文件名只作为展示名称。数据库写入失败时回滚记录并清理文件；进程突然退出仍可能遗留未被引用的文件，后续清理流程需按数据库引用核对。
+
+`GET /api/v1/artifacts/{artifact_id}/content` 可鉴权下载简历；不提供直接公开文件路径。文件存储目录可通过 `JOB_AGENT_ARTIFACTS_DIR` 设置，备份数据库时一并备份该目录。
+
+新增代码主要是 `app/schemas.py`（数据契约）、`app/api/resources.py`（业务接口）、`app/api/dependencies.py`（鉴权和会话）、`app/storage.py`（文件校验与存储）。本阶段无数据库结构变更，仍使用迁移 0001。
+
+实现参考：[FastAPI 文件上传](https://fastapi.tiangolo.com/tutorial/request-files/)、[pypdf PDF 读取](https://pypdf.readthedocs.io/en/3.15.3/modules/PdfReader.html)。
 
 ## Git 版本控制
 

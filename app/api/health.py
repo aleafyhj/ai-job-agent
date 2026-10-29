@@ -1,3 +1,4 @@
+from tempfile import TemporaryFile
 from typing import Literal
 
 import sqlalchemy as sa
@@ -21,7 +22,7 @@ async def health() -> HealthResponse:
 
 @router.get("/ready", tags=["health"], responses={503: {"description": "Database not ready"}})
 def ready(request: Request):
-    """Database/schema readiness; storage checks join when storage is implemented."""
+    """Check schema revision and writable local artifact storage."""
     engine = request.app.state.db_engine
     if engine is None:
         return JSONResponse(
@@ -50,4 +51,19 @@ def ready(request: Request):
                 "database": "unavailable",
             },
         )
-    return {"status": "ok", "database": "ok"}
+    try:
+        root = request.app.state.settings.artifacts_dir
+        root.mkdir(parents=True, exist_ok=True)
+        with TemporaryFile(dir=root) as probe:
+            probe.write(b"ok")
+            probe.flush()
+    except OSError:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "not_ready",
+                "database": "ok",
+                "storage": "unavailable",
+            },
+        )
+    return {"status": "ok", "database": "ok", "storage": "ok"}

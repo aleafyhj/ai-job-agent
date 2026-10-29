@@ -10,9 +10,11 @@ from starlette.exceptions import HTTPException
 
 from app import __version__
 from app.api.health import router as health_router
+from app.api.resources import router as resources_router
 from app.core.config import Settings
 from app.core.logging import configure_logging
 from app.database import make_engine, make_session_factory
+from app.storage import RequestBodyLimit
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application = FastAPI(title=settings.app_name, version=__version__, lifespan=lifespan)
     application.state.settings = settings
+    application.add_middleware(RequestBodyLimit)
 
     def error_response(request: Request, status: int, code: str, message: str):
         return JSONResponse(
@@ -88,4 +91,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return response
 
     application.include_router(health_router, prefix="/api/v1")
+    application.include_router(resources_router, prefix="/api/v1")
     return application

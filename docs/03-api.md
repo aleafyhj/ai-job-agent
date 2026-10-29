@@ -1,4 +1,8 @@
-# 接口契约 v1（设计稿）
+# 接口契约 v1
+
+第三阶段已实现：health/ready；profiles 的创建、列表、详情、更新；简历上传、列表、指定默认简历与鉴权下载；policies 的创建、列表、详情、更新。下面表格中的其他业务接口仍为后续设计，不代表已经可调用。当前以 `/docs` 中生成的 OpenAPI 为实际已实现接口清单。
+
+所有业务接口使用本地配置的 JOB_AGENT_API_TOKEN；缺少配置返回 503，缺少/错误令牌返回 401。就绪检查现包含数据库及本地存储。
 
 ## 1. 通用约定
 
@@ -19,6 +23,7 @@
 | GET `/health` | 无 | 200 `status`，仅进程存活 |
 | GET `/ready` | 无 | 200/503，数据库与存储状态，不暴露凭据 |
 | POST `/profiles` | ProfileWrite | 201 Profile，初始版本 1 |
+| GET `/profiles` | cursor,limit | 档案分页列表 |
 | GET `/profiles/{id}` | 无 | Profile，含当前版本 |
 | PUT `/profiles/{id}` | ProfileWrite，If-Match | 200，新建不可变版本并切换当前版本 |
 | POST `/profiles/{id}/resumes` | multipart `file` | 201 Resume；PDF/DOCX，最大 10MB，验证内容类型 |
@@ -42,6 +47,7 @@
 | POST `/jobs/{id}/analyses` | `profile_id,job_snapshot_id,policy_id` | 202 `analysis_id,task_id`，固定当前档案/规则版本 |
 | GET `/analyses/{id}` | 无 | Analysis，含逐项要求与评分 |
 | POST `/policies` | PolicyWrite | 201 Policy |
+| GET `/policies` | cursor,limit | 策略分页列表 |
 | GET `/policies/{id}` | 无 | Policy |
 | PUT `/policies/{id}` | PolicyWrite，If-Match | 200，新规则版本 |
 | POST `/applications` | `analysis_id,resume_id,platform_account_id` | 202 `application_id,task_id`；同样执行守卫，不能强制绕过阈值 |
@@ -59,13 +65,19 @@
 
 ProfileWrite：`name`（1–100 字）、`skills[]`（`canonical_name,level,evidence,years`，level 为 basic/proficient/expert；years ≥0）、`experience_years`、`education`、`preferred_cities[]`、`remote_preference`（any/required/onsite）、`facts`（允许填写表单的真实信息）。缺失事实保持 null。Profile 响应增加 `id,version,default_resume_id,created_at`。
 
+已实现的字段细则：skills 最多 200 项，名称忽略大小写不可重复；evidence 为非空字符串；years/experience_years 为 0–100、最多两位小数。education/facts 为字符串键及字符串或 null 值的对象。未知请求字段拒绝，返回 422。Profile 响应额外包含 version_id；更新要求 If-Match，支持 `1` 或 `"1"`，读取和更新返回 ETag。PUT 使用完整替换语义，省略的可选字段恢复默认值。
+
 SearchPlanWrite：`name,profile_id,platform_account_ids[],keywords[],cities[],remote,min_salary,max_salary,currency,salary_period,employment_types[],max_pages,max_jobs,policy_id,schedule,enabled`。keywords 至少一项；max_pages 1–20，max_jobs 1–200；salary_period 为 month/year/hour；schedule 为 null 或 `{"cron":"0 9 * * *","timezone":"Asia/Shanghai"}`。cron 使用五段格式，平台数量首期限制 1。
 
 PolicyWrite：`name,threshold`（0–100，默认 70）、`comparison`（gte/gt）、`daily_limit`（1–100，默认 20）、`timezone`（默认 Asia/Shanghai）、`auto_apply`（默认 false，启用后符合条件即投递）、`blocked_companies[]`、`allowed_platforms[]`。评分权重和技能等价规则作为受控版本管理，首期不开放任意脚本规则接口。
 
+当前 allowed_platforms 只接受 boss（BOSS直聘），默认 ["boss"]；timezone 必须是有效 IANA 时区。threshold 支持最多六位小数，响应为十进制字符串；Policy 响应含 id/version/version_id/created_at。本阶段仅保存策略，不执行投递。策略更新同样使用 If-Match/ETag。
+
 Run mode：`collect_only` / `analyze_only` / `auto_apply`。analyze_only 包含搜索采集；auto_apply 只有策略 auto_apply=true 才接受，否则 409。任务创建时冻结配置版本。
 
 Resume：`id,profile_id,version,filename,mime_type,size,sha256,created_at`。
+
+当前 Resume 还返回 artifact_id，用于 `/artifacts/{id}/content` 下载。上传接受 application/pdf 或 application/vnd.openxmlformats-officedocument.wordprocessingml.document，扩展名须对应；最大 10 MiB。拒绝损坏/加密 PDF、空文件、超过 100 页的 PDF、无效 DOCX 包和宏内容；不提取简历文本、不执行文档中的内容。整个写请求限制 12 MiB；文件不合格返回 422，超限返回 413。指定其他档案的默认简历返回 409。上传和选择默认简历不修改能力档案版本号。
 
 Task：`id,type,status,run_id,progress:{stage,completed,total},attempt_count,error:{code,message,retryable},created_at,started_at,finished_at`。未知 total 为 null，不伪造进度百分比。
 

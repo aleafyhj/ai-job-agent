@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, ge=1, le=65535)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     database_url: SecretStr | None = None
+    api_token: SecretStr | None = Field(default=None, min_length=32)
+    artifacts_dir: Path = PROJECT_ROOT / "artifacts"
 
     @field_validator("database_url")
     @classmethod

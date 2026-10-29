@@ -1,6 +1,5 @@
 """Real PostgreSQL integration tests; each test owns a disposable UUID-named schema."""
 
-import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from uuid import uuid4
@@ -9,46 +8,17 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.autogenerate import compare_metadata
-from alembic.config import Config
 from alembic.migration import MigrationContext
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from sqlalchemy.schema import CreateSchema, DropSchema
 
 from app import models as m
-from app.core.config import PROJECT_ROOT, Settings
+from app.core.config import Settings
 from app.main import create_app
 from app.transactions import ApplicationBlocked, claim_task, enqueue_application, heartbeat_task
 
 pytestmark = pytest.mark.postgres
-
-
-@pytest.fixture
-def database():
-    url = os.environ.get("TEST_DATABASE_URL")
-    if not url:
-        pytest.skip("set TEST_DATABASE_URL to run PostgreSQL integration tests")
-    schema = "test_" + uuid4().hex
-    admin = sa.create_engine(url, hide_parameters=True)
-    with admin.begin() as connection:
-        connection.execute(CreateSchema(schema))
-    engine = sa.create_engine(
-        url,
-        hide_parameters=True,
-        connect_args={"options": f"-c search_path={schema} -c statement_timeout=10000"},
-    )
-    config = Config(str(PROJECT_ROOT / "alembic.ini"))
-    try:
-        with engine.begin() as connection:
-            config.attributes["connection"] = connection
-            command.upgrade(config, "head")
-        yield engine, config
-    finally:
-        engine.dispose()
-        with admin.begin() as connection:
-            connection.execute(DropSchema(schema, cascade=True))
-        admin.dispose()
 
 
 def add(session, table, **values):
@@ -334,7 +304,11 @@ def test_readiness_with_and_without_schema(database):
         assert client.get("/api/v1/health").status_code == 200
         assert client.get("/api/v1/ready").status_code == 503
         app.state.db_engine = engine
-        assert client.get("/api/v1/ready").json() == {"status": "ok", "database": "ok"}
+        assert client.get("/api/v1/ready").json() == {
+            "status": "ok",
+            "database": "ok",
+            "storage": "ok",
+        }
         with engine.begin() as connection:
             config.attributes["connection"] = connection
             command.downgrade(config, "base")

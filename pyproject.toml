@@ -10,6 +10,9 @@ dependencies = [
     "sqlalchemy>=2.0,<2.1",
     "alembic>=1.13,<2",
     "psycopg[binary]>=3.2,<4",
+    "python-multipart>=0.0.20,<1",
+    "pypdf>=6,<7",
+    "defusedxml>=0.7,<1",
 ]
 
 [dependency-groups]
