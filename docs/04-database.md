@@ -1,6 +1,10 @@
 # 数据库设计（PostgreSQL 逻辑模型）
 
-本文件是设计，不创建数据库。所有主键 UUID；时间 `timestamptz`；默认 UTC 存储。除不可变子记录外包含 `created_at,updated_at`。金额 numeric(14,2)，分数 numeric(9,6)，散列使用 SHA-256。业务对象使用状态归档，含审计引用的记录不直接级联删除。
+第二步已依据本设计实现 PostgreSQL 模型和初始迁移，详见 `app/models.py` 与 `migrations/versions/0001_initial.py`。除资源租约使用 resource_key 为主键外，主键为 UUID；时间为 timestamptz。各表包含 created_at/updated_at（executor_leases 除外），不可变版本的更新时间固定为创建时间。分数 numeric(9,6)，散列使用 SHA-256。业务对象使用状态归档，含审计引用的记录不直接级联删除。
+
+模型使用 SQLAlchemy Core，Session 执行事务，不引入 ORM 对象关系映射。版本/快照/简历禁止 UPDATE 与 DELETE；审计记录只允许追加。循环指针采用复合外键，申请的档案/分析/职位/平台归属由触发器校验。原始 SQL 若需生成 UUID 须显式传入；SQLAlchemy 插入时由 Python 默认生成。updated_at 由 SQLAlchemy 更新语句自动维护，原始 SQL 调用者需显式维护。
+
+enqueue_application 原子完成去重、当前版本校验、策略/会话状态检查、候选人跨账户日额度预留、申请及任务写入；完整提交守卫、额度消费/释放、执行器资源租约算法和异常恢复将在后续业务阶段实现。日额度通过预留时间落在当前策略时区的自然日区间统计，不按账户分别放宽。
 
 ## 1. 表结构
 

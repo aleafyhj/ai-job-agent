@@ -53,3 +53,12 @@ def test_not_found_and_unexpected_error_are_traceable():
             assert response.status_code == expected_status
             assert response.json()["request_id"] == response.headers["X-Request-ID"]
             assert "private-error-detail" not in response.text
+
+
+def test_database_config_hides_credentials_and_rejects_other_backends():
+    url = "postgresql+psycopg://candidate:private-password@localhost/test"
+    settings = Settings(_env_file=None, database_url=url)
+    assert "private-password" not in repr(settings)
+    with pytest.raises(ValidationError) as error:
+        Settings(_env_file=None, database_url="sqlite:///private-password")
+    assert "private-password" not in str(error.value)

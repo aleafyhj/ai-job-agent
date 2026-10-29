@@ -12,6 +12,7 @@ from app import __version__
 from app.api.health import router as health_router
 from app.core.config import Settings
 from app.core.logging import configure_logging
+from app.database import make_engine, make_session_factory
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +23,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         configure_logging(settings.log_level)
+        engine = (
+            make_engine(settings.database_url.get_secret_value()) if settings.database_url else None
+        )
+        application.state.db_engine = engine
+        application.state.db_sessions = make_session_factory(engine) if engine else None
         logger.info("service_started")
-        yield
-        logger.info("service_stopped")
+        try:
+            yield
+        finally:
+            if engine is not None:
+                engine.dispose()
+            logger.info("service_stopped")
 
     application = FastAPI(title=settings.app_name, version=__version__, lifespan=lifespan)
     application.state.settings = settings
