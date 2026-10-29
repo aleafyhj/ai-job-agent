@@ -1,0 +1,13 @@
+.venv/
+.tools/
+.uv-cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+pytest-of-*/
+.ruff_cache/
+.env
+.env.*
+!.env.example
+artifacts/
+*.log
