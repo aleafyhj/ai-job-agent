@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 
@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     database_url: SecretStr | None = None
     api_token: SecretStr | None = Field(default=None, min_length=32)
     artifacts_dir: Path = PROJECT_ROOT / "artifacts"
+    vision_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    vision_model: str = "qwen3-vl-plus"
+    vision_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "JOB_AGENT_VISION_API_KEY",
+            "DASHSCOPE_API_KEY",
+        ),
+    )
 
     @field_validator("database_url")
     @classmethod
