@@ -1,3 +1,4 @@
+import hashlib
 import json
 from io import BytesIO
 from types import SimpleNamespace
@@ -6,7 +7,7 @@ import pytest
 from PIL import Image
 
 from app.boss_desktop import main, run
-from app.desktop import Desktop, pixel
+from app.desktop import Desktop, pixel, verify_target_image
 from app.desktop_report import ground_card, observe, verify_selection
 from app.vision import Card, Requirement, Screen, TitleTarget, score
 
@@ -245,3 +246,54 @@ def test_local_title_mapping_and_conservative_identity(tmp_path):
     )
     with pytest.raises(RuntimeError, match="未执行点击"):
         ground_card(bad, png_bytes(), card, original.cards, tmp_path)
+
+
+@pytest.mark.parametrize(
+    "change,mode,should_click",
+    [
+        ("outside", True, True),
+        ("outside", False, False),
+        ("target", True, False),
+        ("window", True, False),
+    ],
+)
+def test_card_guard_ignores_only_unrelated_changes(change, mode, should_click, tmp_path):
+    before = png_bytes()
+    with Image.open(BytesIO(before)) as source:
+        source = source.convert("RGB")
+        source.putpixel((500, 500) if change == "target" else (10, 10), (0, 0, 0))
+        stream = BytesIO()
+        source.save(stream, format="PNG")
+        current = stream.getvalue()
+    old_signature = (1, 0, 0, 1000, 1000)
+    new_signature = (1, 100, 0, 1100, 1000) if change == "window" else old_signature
+    desktop = Desktop.__new__(Desktop)
+    desktop._last_frame = (hashlib.sha256(before).digest(), old_signature)
+    desktop.check_window = lambda: 1
+    desktop.window_signature = lambda: new_signature
+    desktop.point = lambda x, y: None
+    clicks = []
+    desktop.gui = SimpleNamespace(
+        moveTo=lambda *a, **kw: None, position=lambda: (500, 500), click=lambda: clicks.append(1)
+    )
+
+    def capture():
+        desktop._last_frame = (hashlib.sha256(current).digest(), new_signature)
+        return current, (1000, 1000)
+
+    desktop.capture = capture
+    if should_click:
+        desktop.click(500, 500, expected=before, target_only=mode, diagnostics=tmp_path)
+        assert clicks == [1]
+    else:
+        with pytest.raises(RuntimeError):
+            desktop.click(500, 500, expected=before, target_only=mode, diagnostics=tmp_path)
+        assert clicks == []
+        assert (tmp_path / "guard-current.png").read_bytes() == current
+
+
+def test_target_guard_rejects_screen_resize():
+    stream = BytesIO()
+    Image.new("RGB", (800, 800)).save(stream, format="PNG")
+    with pytest.raises(RuntimeError, match="屏幕尺寸"):
+        verify_target_image(png_bytes(), stream.getvalue(), 500, 500)

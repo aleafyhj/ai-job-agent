@@ -88,7 +88,7 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None, o
                 continue
             target = ground_card(vision, image, card, screen.cards, observation_folder)
             print("精确标题点击坐标:", target)
-            desktop.click(*target, expected=image)
+            desktop.click(*target, expected=image, target_only=True, diagnostics=observation_folder)
             (observation_folder / "action.json").write_text(
                 json.dumps(
                     {
@@ -306,7 +306,7 @@ def main():
                 card = screen.cards[args.card_index - 1]
                 target = ground_card(vision, image, card, screen.cards, folder)
                 print("精确标题点击坐标:", target)
-                desktop.click(*target, expected=image)
+                desktop.click(*target, expected=image, target_only=True, diagnostics=folder)
                 (folder / "action.json").write_text(
                     json.dumps(
                         {
