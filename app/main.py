@@ -10,6 +10,7 @@ from starlette.exceptions import HTTPException
 
 from app import __version__
 from app.api.health import router as health_router
+from app.api.jobs import router as jobs_router
 from app.api.resources import router as resources_router
 from app.core.config import Settings
 from app.core.logging import configure_logging
@@ -92,4 +93,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application.include_router(health_router, prefix="/api/v1")
     application.include_router(resources_router, prefix="/api/v1")
+    application.include_router(jobs_router, prefix="/api/v1")
     return application

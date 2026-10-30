@@ -2,6 +2,8 @@
 
 第三阶段已实现：health/ready；profiles 的创建、列表、详情、更新；简历上传、列表、指定默认简历与鉴权下载；policies 的创建、列表、详情、更新。下面表格中的其他业务接口仍为后续设计，不代表已经可调用。当前以 `/docs` 中生成的 OpenAPI 为实际已实现接口清单。
 
+2026-10-30 增量：新增 GET /jobs（当前支持 cursor/limit/platform_key/status）、GET /jobs/{id}（含最新正文快照）、GET /analyses/{id}（含 is_current）。过期分析的 eligible 返回 false。GET /artifacts/{id}/content 同时支持鉴权下载职位截图。桌面 run 负责采集和落库；POST 分析、任务调度以及候选人分数筛选接口尚未开放。
+
 所有业务接口使用本地配置的 JOB_AGENT_API_TOKEN；缺少配置返回 503，缺少/错误令牌返回 401。就绪检查现包含数据库及本地存储。
 
 ## 1. 通用约定

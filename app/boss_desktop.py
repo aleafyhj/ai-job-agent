@@ -5,6 +5,7 @@ import hashlib
 import json
 import time
 from datetime import datetime
+from pathlib import Path
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
@@ -12,9 +13,11 @@ from sqlalchemy.orm import Session
 
 from app import models as m
 from app.api.resources import get_row, policy_read, profile_read
+from app.collected_jobs import persist_analysis
 from app.core.config import Settings
 from app.database import make_engine
 from app.desktop import Desktop, pixel
+from app.desktop_report import observe, verify_selection
 from app.vision import Vision, score
 
 
@@ -33,7 +36,7 @@ def save_state(path, state):
     temporary.replace(path)
 
 
-def run(desktop, vision, profile, policy, root, args, before_communicate=None):
+def run(desktop, vision, profile, policy, root, args, before_communicate=None, on_analysis=None):
     """Bounded loop. One fresh card click at a time; no stale per-page coordinate batch."""
     state_path = root / "history.json"
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
@@ -54,9 +57,17 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None):
     for page in range(args.pages):
         while processed < args.jobs:
             image, size = desktop.capture()
-            screen = vision.inspect(image, evidence, "list")
+            screen, size, observation_folder = observe(vision, image, evidence, "list", root)
             if screen.blocked or screen.uncertain:
                 raise RuntimeError("页面验证、弹窗或识别不确定，已暂停")
+            left_scroll = args.left_scroll or (
+                screen.list_scroll.center if screen.list_scroll else None
+            )
+            right_scroll = args.right_scroll or (
+                screen.detail_scroll.center if screen.detail_scroll else None
+            )
+            if left_scroll is None or right_scroll is None:
+                raise RuntimeError("未能识别左右滚动区域；请查看报告或显式提供滚动坐标")
             card = next((item for item in screen.cards if identity(item) not in seen), None)
             if card is None:
                 break
@@ -76,10 +87,23 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None):
             ):
                 continue
             desktop.click(*pixel(card.center, size), expected=image)
+            (observation_folder / "action.json").write_text(
+                json.dumps(
+                    {
+                        "action": "card_click",
+                        "card": card.model_dump(),
+                        "pixel": pixel(card.center, size),
+                        "status": "input_executed",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
             time.sleep(args.settle)
             # New selections normally reset the pane; explicitly return it upward as well.
             for _ in range(args.detail_scrolls):
-                desktop.scroll(*pixel(args.right_scroll, size), ticks=10)
+                desktop.scroll(*pixel(right_scroll, size), ticks=10)
             time.sleep(args.settle)
             parts = []
             requirements = {}
@@ -88,11 +112,12 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None):
             detail = None
             for part in range(args.detail_scrolls + 1):
                 detail_image, size = desktop.capture()
-                detail = vision.inspect(detail_image, evidence, "detail")
+                detail, size, _ = observe(vision, detail_image, evidence, "detail", root)
                 if detail.blocked or detail.uncertain:
                     raise RuntimeError("详情识别不确定，停止操作")
-                if part == 0 and (detail.selected is None or identity(detail.selected) != key):
-                    raise RuntimeError("卡片与右侧职位身份不一致，停止操作")
+                verify_selection(card, detail)
+                if part == 0 and not detail.detail_start_visible:
+                    raise RuntimeError("未确认详情正文顶部，禁止对缺失开头的要求评分")
                 parts.append(detail.detail_text)
                 for item in detail.requirements:
                     if item.quote not in detail.detail_text:
@@ -109,17 +134,19 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None):
                     complete = True
                     break
                 if part < args.detail_scrolls:
-                    desktop.scroll(*pixel(args.right_scroll, size), ticks=-args.ticks)
+                    desktop.scroll(*pixel(right_scroll, size), ticks=-args.ticks)
                     time.sleep(args.settle)
             combined = "\n".join(parts)
             if complete:
-                detail = vision.inspect(
+                detail, _, _ = observe(
+                    vision,
                     detail_image,
                     {
                         **evidence,
                         "complete_detail_text": combined,
                     },
                     "evaluate_all_text",
+                    root,
                 )
                 if detail.blocked or detail.uncertain:
                     raise RuntimeError("完整详情评估不确定，停止")
@@ -137,9 +164,15 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None):
                 "hard_conditions": hard,
                 "profile_version": profile["version_id"],
                 "policy_version": policy["version_id"],
-                "state": "analyzed",
+                "state": "analyzed" if value is not None and hard != "unknown" else "needs_review",
                 "requirements": [item.model_dump() for item in detail.requirements],
+                "detail_text": combined,
+                "detail_complete": complete,
             }
+            screenshot_path = root / f"detail-{uuid4().hex}.png"
+            screenshot_path.write_bytes(detail_image)
+            if on_analysis is not None:
+                record.update(on_analysis(key, card, detail, record, screenshot_path))
             passes = value is not None and (
                 value >= float(policy["threshold"])
                 if policy["comparison"] == "gte"
@@ -194,22 +227,28 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None):
                 continue
             state[history_key] = record
             save_state(state_path, state)
-            (root / f"detail-{uuid4().hex}.png").write_bytes(detail_image)
             # Return the detail pane to its top for the next card.
+            print(f"已分析 {processed}: {card.title} | 匹配度={value} | 硬条件={hard}")
             for _ in range(args.detail_scrolls):
-                desktop.scroll(*pixel(args.right_scroll, size), ticks=args.ticks)
+                desktop.scroll(*pixel(right_scroll, size), ticks=args.ticks)
             time.sleep(args.settle)
         if processed >= args.jobs:
             break
         if page + 1 < args.pages:
-            desktop.scroll(*pixel(args.left_scroll, size), ticks=-args.ticks)
+            desktop.scroll(*pixel(left_scroll, size), ticks=-args.ticks)
             time.sleep(args.settle)
     return processed
 
 
 def main():
     parser = argparse.ArgumentParser(description="BOSS直聘截图/坐标执行器")
-    parser.add_argument("action", choices=["screenshot", "click", "scroll", "run"])
+    parser.add_argument(
+        "action", choices=["screenshot", "click", "scroll", "inspect", "click-card", "run"]
+    )
+    parser.add_argument("--image", type=Path, help="仅用于 inspect：识别已有图片，不操作桌面")
+    parser.add_argument(
+        "--card-index", type=int, default=1, help="click-card：本次实时识别的卡片序号，从1开始"
+    )
     parser.add_argument("--title", default="BOSS直聘")
     parser.add_argument("--x", type=int)
     parser.add_argument("--y", type=int)
@@ -220,8 +259,12 @@ def main():
     parser.add_argument("--jobs", type=int, choices=range(1, 201), default=20)
     parser.add_argument("--detail-scrolls", type=int, choices=range(1, 21), default=5)
     parser.add_argument("--settle", type=float, default=2)
-    parser.add_argument("--left-scroll", nargs=2, type=int, default=[200, 500])
-    parser.add_argument("--right-scroll", nargs=2, type=int, default=[750, 800])
+    parser.add_argument(
+        "--left-scroll", nargs=2, type=int, help="覆盖模型识别的左侧滚动点，归一化坐标"
+    )
+    parser.add_argument(
+        "--right-scroll", nargs=2, type=int, help="覆盖模型识别的右侧滚动点，归一化坐标"
+    )
     parser.add_argument("--communicate", action="store_true")
     args = parser.parse_args()
     settings = Settings()
@@ -236,10 +279,47 @@ def main():
     try:
         if not 1 <= args.settle <= 30:
             raise ValueError("settle 必须为 1..30 秒")
-        desktop = Desktop(args.title)
-        print("请在5秒内切换到已手动登录的 BOSS直聘职位列表；Ctrl+C停止")
-        time.sleep(5)
-        if args.action == "screenshot":
+        if args.image and args.action != "inspect":
+            raise ValueError("--image 只能配合 inspect；离线图片不能用于点击")
+        desktop = None
+        if args.image is None:
+            desktop = Desktop(args.title)
+            print("请在5秒内切换到已手动登录的 BOSS直聘职位列表；Ctrl+C停止")
+            time.sleep(5)
+        if args.action in {"inspect", "click-card"}:
+            image = args.image.read_bytes() if args.image else desktop.capture()[0]
+            vision = Vision(settings)
+            screen, size, folder = observe(vision, image, {"skills": []}, "list", root)
+            if screen.blocked or screen.uncertain:
+                raise RuntimeError("识别不确定，报告已保存，不执行点击")
+            for index, card in enumerate(screen.cards, 1):
+                print(
+                    f"#{index} {card.title} | {card.company} | {card.salary} | "
+                    f"像素{pixel(card.center, size)}"
+                )
+            print("坐标预览图:", (folder / "targets.png").resolve())
+            if args.action == "click-card":
+                if not 1 <= args.card_index <= len(screen.cards):
+                    raise ValueError("卡片序号超出本次识别范围")
+                card = screen.cards[args.card_index - 1]
+                desktop.click(*pixel(card.center, size), expected=image)
+                (folder / "action.json").write_text(
+                    json.dumps(
+                        {
+                            "action": "card_click",
+                            "card_index": args.card_index,
+                            "pixel": pixel(card.center, size),
+                            "status": "input_executed",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                time.sleep(args.settle)
+                after, _ = desktop.capture()
+                result, _, _ = observe(vision, after, {"skills": []}, "detail", root)
+                verify_selection(card, result)
+                print("已确认：右侧详情切换到选中的职位；没有执行沟通")
+        elif args.action == "screenshot":
             image, _ = desktop.capture()
             path = root / "screen.png"
             path.write_bytes(image)
@@ -293,8 +373,14 @@ def main():
                     ):
                         raise RuntimeError("能力档案或策略已经变化，请重新启动")
 
+            def store_analysis(key, card, detail, record, image_path):
+                return persist_analysis(
+                    engine, settings, profile, policy, key, card, detail, record, image_path
+                )
+
             print(
-                "本次分析数量:", run(desktop, vision, profile, policy, root, args, check_versions)
+                "本次分析数量:",
+                run(desktop, vision, profile, policy, root, args, check_versions, store_analysis),
             )
     except KeyboardInterrupt:
         print("用户已停止")

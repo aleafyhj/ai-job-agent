@@ -1,10 +1,13 @@
 import json
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
+from PIL import Image
 
 from app.boss_desktop import main, run
 from app.desktop import Desktop, pixel
+from app.desktop_report import observe, verify_selection
 from app.vision import Card, Requirement, Screen, score
 
 
@@ -17,6 +20,7 @@ def screen():
         selected=card,
         detail_text="熟悉Python",
         detail_complete=True,
+        detail_start_visible=True,
         hard_conditions="pass",
         requirements=[Requirement(quote="熟悉Python", importance="required", skill_index=0)],
     )
@@ -54,7 +58,7 @@ def test_readonly_loop_and_restart_dedup(tmp_path, monkeypatch):
     monkeypatch.setattr("app.boss_desktop.time.sleep", lambda _: None)
     clicks = []
     desktop = SimpleNamespace(
-        capture=lambda: (b"image", (1000, 1000)),
+        capture=lambda: (png_bytes(), (1000, 1000)),
         click=lambda *a, **kw: clicks.append(a),
         scroll=lambda *a, **kw: None,
     )
@@ -88,7 +92,7 @@ def test_readonly_loop_and_restart_dedup(tmp_path, monkeypatch):
 
 
 def test_blocked_page_stops_before_click(tmp_path):
-    desktop = SimpleNamespace(capture=lambda: (b"image", (1000, 1000)))
+    desktop = SimpleNamespace(capture=lambda: (png_bytes(), (1000, 1000)))
     vision = SimpleNamespace(inspect=lambda *a: Screen())
     profile = dict(
         id="p",
@@ -133,3 +137,78 @@ def test_manual_command_saves_images_and_reports_paths(action, tmp_path, monkeyp
         assert str((root / name).resolve()) in output
     assert calls == ([] if action == "screenshot" else [action])
     assert not (root / "desktop.lock").exists()
+
+
+def png_bytes():
+    stream = BytesIO()
+    Image.new("RGB", (1000, 1000), "white").save(stream, format="PNG")
+    return stream.getvalue()
+
+
+def test_observation_saves_coordinates_and_failure_report(tmp_path):
+    result, size, folder = observe(
+        SimpleNamespace(inspect=lambda *a: screen()), png_bytes(), {}, "list", tmp_path
+    )
+    report = json.loads((folder / "report.json").read_text(encoding="utf-8"))
+    assert size == (1000, 1000)
+    assert report["cards"][0]["pixel"] == [200, 300]
+    assert (folder / "targets.png").is_file()
+    assert (folder / "screen.png").read_bytes() == png_bytes()
+    verify_selection(result.cards[0], result)
+    result.selected = result.selected.model_copy(update={"company": "Other"})
+    with pytest.raises(RuntimeError, match="身份不匹配"):
+        verify_selection(result.cards[0], result)
+
+    def fail(*_):
+        raise RuntimeError("secret provider diagnostics")
+
+    with pytest.raises(RuntimeError):
+        observe(SimpleNamespace(inspect=fail), png_bytes(), {}, "detail", tmp_path)
+    reports = [json.loads(p.read_text(encoding="utf-8")) for p in tmp_path.rglob("report.json")]
+    failed = next(item for item in reports if item["status"] == "failed")
+    assert failed["error_type"] == "RuntimeError"
+    assert "secret" not in json.dumps(failed)
+
+
+def test_offline_inspect_never_constructs_desktop(tmp_path, monkeypatch):
+    source = tmp_path / "source.png"
+    source.write_bytes(png_bytes())
+    monkeypatch.setattr(
+        "app.boss_desktop.Desktop", lambda _: pytest.fail("offline must not control desktop")
+    )
+    monkeypatch.setattr(
+        "app.boss_desktop.Settings", lambda: SimpleNamespace(artifacts_dir=tmp_path)
+    )
+    monkeypatch.setattr(
+        "app.boss_desktop.Vision", lambda _: SimpleNamespace(inspect=lambda *a: screen())
+    )
+    monkeypatch.setattr("sys.argv", ["boss_desktop", "inspect", "--image", str(source)])
+    main()
+    assert len(list(tmp_path.rglob("report.json"))) == 1
+    assert not (tmp_path / "boss-desktop" / "desktop.lock").exists()
+
+
+@pytest.mark.parametrize("index,expected_clicks", [(1, 1), (2, 0)])
+def test_click_card_uses_fresh_model_coordinates(index, expected_clicks, tmp_path, monkeypatch):
+    clicks = []
+    desktop = SimpleNamespace(
+        capture=lambda: (png_bytes(), (1000, 1000)),
+        click=lambda *a, **kw: clicks.append((a, kw)),
+    )
+    monkeypatch.setattr("app.boss_desktop.Desktop", lambda _: desktop)
+    monkeypatch.setattr(
+        "app.boss_desktop.Settings", lambda: SimpleNamespace(artifacts_dir=tmp_path)
+    )
+    monkeypatch.setattr(
+        "app.boss_desktop.Vision", lambda _: SimpleNamespace(inspect=lambda *a: screen())
+    )
+    monkeypatch.setattr("app.boss_desktop.time.sleep", lambda _: None)
+    monkeypatch.setattr("sys.argv", ["boss_desktop", "click-card", "--card-index", str(index)])
+    if expected_clicks:
+        main()
+        assert clicks[0][0] == (200, 300)
+        assert clicks[0][1]["expected"] == png_bytes()
+    else:
+        with pytest.raises(SystemExit):
+            main()
+    assert len(clicks) == expected_clicks

@@ -41,6 +41,9 @@ class Screen(BaseModel):
     hard_conditions: Literal["pass", "fail", "unknown"] = "unknown"
     communicate: Box | None = None
     communication_confirmed: bool = False
+    list_scroll: Box | None = None
+    detail_scroll: Box | None = None
+    detail_start_visible: bool = False
 
 
 class Vision:
@@ -59,6 +62,9 @@ class Vision:
             "遇验证码、登录、异常弹窗或无法可靠识别时blocked=true。"
             "cards仅含左侧完整可见职位卡，center必须落在卡片标题；不包含按钮。"
             "selected必须是当前右侧详情对应的卡片，无法匹配则null。"
+            "list_scroll必须定位在左侧职位列表的内部空白位置，detail_scroll必须定位在右侧正文内部，"
+            "不能落在浏览器栏、侧栏、按钮、页面外或列表与详情的间隙。"
+            "detail_start_visible仅当右侧正文从职位描述/岗位职责起始部分可见时true。"
             "detail_text逐字转录右侧正文。正文没读到完整任职要求末尾时detail_complete=false。"
             "requirements.quote必须是detail_text中的原文片段；去重要求，区分required/preferred。"
             "skill_index仅当档案技能、年限、熟练度和项目证据足以支持整项要求时填写，"

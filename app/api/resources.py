@@ -285,7 +285,16 @@ def set_default_resume(profile_id: UUID, body: DefaultResumeWrite, session: DB):
 @router.get("/artifacts/{artifact_id}/content", tags=["resumes"])
 def download_artifact(artifact_id: UUID, session: DB, request: Request):
     artifact = get_row(session, m.artifacts, artifact_id)
-    # Only resume downloads are exposed in this phase.
+    if artifact["kind"] == "job_screenshot":
+        path = resolve_artifact(request.app.state.settings.artifacts_dir, artifact["storage_key"])
+        if not path.is_file():
+            raise HTTPException(404, "文件不存在")
+        return FileResponse(
+            path,
+            media_type="image/png",
+            filename=f"job-{artifact_id}.png",
+            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        )
     resume = (
         session.execute(sa.select(m.resumes).where(m.resumes.c.artifact_id == artifact_id))
         .mappings()
