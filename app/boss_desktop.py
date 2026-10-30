@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -18,15 +19,20 @@ from app.core.config import Settings
 from app.database import make_engine
 from app.desktop import Desktop, pixel
 from app.desktop_collection import collect_detail
-from app.desktop_report import ground_card, observe, verify_selection
+from app.desktop_report import ground_card, normalized, observe, verify_selection
 from app.mouse_bridge import BridgeMouse
-from app.vision import Vision, match_report
+from app.vision import Card, Vision, match_report
 
 
 def identity(card):
     return hashlib.sha256(
         json.dumps(
-            [card.title.strip(), card.company.strip(), card.city.strip(), card.salary.strip()],
+            [
+                normalized(card.title),
+                normalized(card.company),
+                re.split(r"[-·•/]+", normalized(card.city))[:2],
+                normalized(card.salary),
+            ],
             ensure_ascii=False,
         ).encode()
     ).hexdigest()
@@ -40,6 +46,9 @@ def save_state(path, state):
 
 def run(desktop, vision, profile, policy, root, args, before_communicate=None, on_analysis=None):
     """Bounded loop. One fresh card click at a time; no stale per-page coordinate batch."""
+    simulation = profile.get("facts", {}).get("data_kind") == "simulation"
+    if simulation and getattr(args, "communicate", False):
+        raise ValueError("模拟档案仅用于采集评分，禁止沟通")
     state_path = root / "history.json"
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
     seen = set()
@@ -65,11 +74,6 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None, o
             left_scroll = args.left_scroll or (
                 screen.list_scroll.center if screen.list_scroll else None
             )
-            right_scroll = args.right_scroll or (
-                screen.detail_scroll.center if screen.detail_scroll else None
-            )
-            if left_scroll is None or right_scroll is None:
-                raise RuntimeError("未能识别左右滚动区域；请查看报告或显式提供滚动坐标")
             card = next((item for item in screen.cards if identity(item) not in seen), None)
             if card is None:
                 break
@@ -79,10 +83,21 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None, o
                 continue
             history_key = str(profile["id"]) + ":" + key
             previous = state.get(history_key)
+            if previous is None:
+                # Preserve earlier database identity keys while recognizing the
+                # same card despite punctuation/case changes in model output.
+                for name, item in state.items():
+                    if (
+                        name.startswith(str(profile["id"]) + ":")
+                        and identity(Card.model_validate(item["card"])) == key
+                    ):
+                        history_key, previous = name, item
+                        break
             if previous and (
                 previous["state"].startswith("communication_")
                 or (
                     not args.communicate
+                    and previous.get("state") == "analyzed"
                     and previous.get("profile_version") == profile["version_id"]
                     and previous.get("policy_version") == policy["version_id"]
                 )
@@ -112,12 +127,16 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None, o
             complete = detail.detail_complete
             hard = detail.hard_conditions
             decision = match_report(detail, skills, policy)
+            if simulation:
+                decision["eligible"] = False
+                decision["reasons"].append("simulation_profile")
             value = decision["score"]
             processed += 1
             record = {
                 "card": card.model_dump(),
                 "score": value,
                 "decision": decision,
+                "simulation": simulation,
                 "hard_conditions": hard,
                 "profile_version": profile["version_id"],
                 "policy_version": policy["version_id"],
@@ -130,7 +149,9 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None, o
             screenshot_path = root / f"detail-{uuid4().hex}.png"
             screenshot_path.write_bytes(detail_image)
             if on_analysis is not None:
-                record.update(on_analysis(key, card, detail, record, screenshot_path))
+                record.update(
+                    on_analysis(history_key.split(":", 1)[1], card, detail, record, screenshot_path)
+                )
             if args.communicate and decision["eligible"]:
                 if before_communicate is None:
                     raise RuntimeError("缺少投递前版本校验，禁止沟通")
@@ -180,14 +201,12 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None, o
                 continue
             state[history_key] = record
             save_state(state_path, state)
-            # Return the detail pane to its top for the next card.
             print(f"已分析 {processed}: {card.title} | 匹配度={value} | 硬条件={hard}")
-            for _ in range(args.detail_scrolls):
-                desktop.scroll(*pixel(right_scroll, size), ticks=args.ticks)
-            time.sleep(args.settle)
         if processed >= args.jobs:
             break
         if page + 1 < args.pages:
+            if left_scroll is None:
+                raise RuntimeError("未识别列表滚动区域，停止翻页")
             desktop.scroll(*pixel(left_scroll, size), ticks=-args.ticks)
             time.sleep(args.settle)
     return processed

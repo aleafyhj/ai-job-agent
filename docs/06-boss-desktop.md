@@ -99,7 +99,23 @@ Windows参考：[线程级DPI感知](https://learn.microsoft.com/en-us/windows/w
 
 ## 自动循环的数据保存与查询
 
-### 先单独验证完整正文采集
+### 用模拟技能验证多个职位（禁止沟通）
+
+```powershell
+python -m scripts.seed_demo
+$demo = Get-Content .\artifacts\boss-desktop\demo-resources.json | ConvertFrom-Json
+python -u -m app.boss_desktop run --profile-id $demo.profile_id --policy-id $demo.policy_id --pages 2 --jobs 3 --detail-scrolls 10
+```
+
+先启动鼠标服务，手动登录 BOSS 并最大化职位列表窗口。`seed_demo` 创建或复用明确命名的模拟档案和 `auto_apply=false` 策略，ID 保存到上述 JSON。模拟 Python/FastAPI/PostgreSQL/RAG/LangChain 等技能仅用于链路测试，不代表用户能力；此档案即使误传 `--communicate` 也会被拒绝。模拟分析保留分数和匹配依据，但数据库 `eligible=false`，证据标注 `profile_data_kind=simulation`。
+
+不传 `--communicate` 时只会点击职位标题、滚动、采集、分析并保存。`history.json` 各条包含独立 job_id/snapshot_id/analysis_id 和正文采集报告；同档案/策略版本已处理的职位会跳过。后续上传简历并提取真实技能时应创建或确认真实档案，不能将模拟项目经历直接当成用户事实。
+
+2026-10-30 实测累计完成3个职位（2个连续完成，1个补测完成），分别为 AI工程师/长春市茂宏网络、APP全栈开发工程师/广州网谊贸易有限公司、AI应用开发/华为；均保存完整正文及独立分析ID，沟通与申请记录为0。最终复跑因前台窗口变化停止，用户选择暂缓占用电脑。结果报告为 `artifacts/boss-desktop/multi-job-validation.json`。本次审核发现学历/软能力仍可能被模型混入技能分母，复合需求拆分亦不稳定，因此当前分数只用于链路联调，尚不具备自动沟通的评分准确性保证。
+
+已完成且档案/策略版本相同的分析会跳过；needs_review 在下一次运行允许重新采集，communication_pending/unknown/confirmed 仍禁止自动重发。职位身份比较规范化括号、空格、大小写和地点分隔符，并兼容此前 history 的身份键；详情滚动使用点击后的新观察坐标，列表仅在实际翻页时要求列表滚动点。
+
+### 当前职位单独采集
 
 无需创建能力档案，先手动打开一个职位，最大化浏览器，确保正文没有横向截断，再运行：
 

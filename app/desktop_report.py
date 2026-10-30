@@ -67,7 +67,10 @@ def verify_selection(expected, observed):
     ]
     left = re.split(r"[-·•/]+", normalized(expected.city))
     right = re.split(r"[-·•/]+", normalized(observed.selected.city))
-    if left != right and not (left[0] == right[0] and (len(left) == 1 or len(right) == 1)):
+    # Cards may show city/district/street while the detail shows city/district.
+    # All shared components must agree; an omitted street is not a mismatch.
+    common = min(len(left), len(right))
+    if left[:common] != right[:common]:
         mismatches.append("city")
     if mismatches:
         raise RuntimeError(

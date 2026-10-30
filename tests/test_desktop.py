@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from app.boss_desktop import main, run
+from app.boss_desktop import identity, main, run
 from app.desktop import Desktop, pixel, verify_target_image
 from app.desktop_report import ground_card, observe, verify_selection
 from app.vision import Card, Requirement, Screen, TitleTarget, score
@@ -31,6 +31,17 @@ def test_coordinate_mapping_and_bounds():
     assert pixel((500, 250), (1920, 1080)) == (960, 270)
     with pytest.raises(ValueError):
         pixel((1001, 250), (1920, 1080))
+
+
+def test_job_identity_normalizes_display_format_without_merging_other_districts():
+    card = (
+        screen()
+        .cards[0]
+        .model_copy(update={"title": "AI开发（Python）", "city": "深圳-龙岗区", "salary": "10-15K"})
+    )
+    same = card.model_copy(update={"title": "ai 开发 (Python)", "city": "深圳·龙岗区·坂田"})
+    assert identity(card) == identity(same)
+    assert identity(card) != identity(same.model_copy(update={"city": "深圳-南山区"}))
 
 
 def test_score_requires_complete_evidence():
@@ -81,7 +92,7 @@ def test_readonly_loop_and_restart_dedup(tmp_path, monkeypatch):
         settle=1,
         ticks=3,
         communicate=False,
-        right_scroll=[750, 800],
+        right_scroll=None,
         left_scroll=[200, 500],
     )
     assert run(desktop, vision, profile, policy, tmp_path, args) == 1
@@ -90,6 +101,15 @@ def test_readonly_loop_and_restart_dedup(tmp_path, monkeypatch):
     assert next(iter(records.values()))["state"] == "analyzed"
     assert run(desktop, vision, profile, policy, tmp_path, args) == 0
     assert len(clicks) == 1
+    history_key = next(iter(records))
+    records[history_key]["state"] = "needs_review"
+    (tmp_path / "history.json").write_text(json.dumps(records), encoding="utf-8")
+    assert run(desktop, vision, profile, policy, tmp_path, args) == 1
+    assert len(clicks) == 2
+    records[history_key]["state"] = "communication_unknown"
+    (tmp_path / "history.json").write_text(json.dumps(records), encoding="utf-8")
+    assert run(desktop, vision, profile, policy, tmp_path, args) == 0
+    assert len(clicks) == 2
 
 
 def test_blocked_page_stops_before_click(tmp_path):
@@ -231,6 +251,8 @@ def test_local_title_mapping_and_conservative_identity(tmp_path):
     original.selected = card.model_copy(update={"city": "深圳·龙岗区"})
     verify_selection(card, original)
     original.selected = card.model_copy(update={"city": "深圳"})
+    verify_selection(card, original)
+    original.selected = card.model_copy(update={"city": "深圳·龙岗区·坂田"})
     verify_selection(card, original)
     original.selected = card.model_copy(update={"city": "深圳·南山区"})
     with pytest.raises(RuntimeError, match="city"):

@@ -125,11 +125,17 @@ def persist_analysis(engine, settings, profile, policy, key, card, detail, recor
             status="needs_review" if needs_review else "ready",
             score=record["score"],
             hard_status=detail.hard_conditions,
-            eligible=bool(passes and not needs_review and detail.hard_conditions == "pass"),
+            eligible=bool(
+                passes
+                and not needs_review
+                and detail.hard_conditions == "pass"
+                and profile.get("facts", {}).get("data_kind") != "simulation"
+            ),
             requirements=record["requirements"],
             match_evidence={
                 "skills": profile["skills"],
                 "decision": record.get("decision"),
+                "profile_data_kind": profile.get("facts", {}).get("data_kind", "unspecified"),
             },
             uncertainties=["incomplete_or_unknown_or_stale"] if needs_review else [],
             prompt_version=ANALYSIS_VERSION,
