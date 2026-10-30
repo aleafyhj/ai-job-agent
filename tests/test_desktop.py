@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.boss_desktop import run
+from app.boss_desktop import main, run
 from app.desktop import Desktop, pixel
 from app.vision import Card, Requirement, Screen, score
 
@@ -101,3 +101,35 @@ def test_blocked_page_stops_before_click(tmp_path):
     args = SimpleNamespace(pages=1, jobs=1)
     with pytest.raises(RuntimeError, match="已暂停"):
         run(desktop, vision, profile, {}, tmp_path, args)
+
+
+@pytest.mark.parametrize("action", ["screenshot", "click", "scroll"])
+def test_manual_command_saves_images_and_reports_paths(action, tmp_path, monkeypatch, capsys):
+    calls = []
+    fake = SimpleNamespace(
+        capture=lambda: (b"test-image", (1000, 1000)),
+        click=lambda *a, **kw: calls.append("click"),
+        scroll=lambda *a, **kw: calls.append("scroll"),
+    )
+    monkeypatch.setattr("app.boss_desktop.Desktop", lambda _: fake)
+    monkeypatch.setattr(
+        "app.boss_desktop.Settings", lambda: SimpleNamespace(artifacts_dir=tmp_path)
+    )
+    monkeypatch.setattr("app.boss_desktop.time.sleep", lambda _: None)
+    monkeypatch.setattr("sys.argv", ["boss_desktop", action, "--x", "200", "--y", "300"])
+    main()
+    root = tmp_path / "boss-desktop"
+    names = (
+        ["screen.png"]
+        if action == "screenshot"
+        else [
+            f"{action}-before.png",
+            f"{action}-after.png",
+        ]
+    )
+    output = capsys.readouterr().out
+    for name in names:
+        assert (root / name).read_bytes() == b"test-image"
+        assert str((root / name).resolve()) in output
+    assert calls == ([] if action == "screenshot" else [action])
+    assert not (root / "desktop.lock").exists()

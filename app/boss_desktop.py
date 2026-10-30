@@ -241,15 +241,31 @@ def main():
         time.sleep(5)
         if args.action == "screenshot":
             image, _ = desktop.capture()
-            (root / "screen.png").write_bytes(image)
-            print("截图已保存到 artifacts/boss-desktop/screen.png")
+            path = root / "screen.png"
+            path.write_bytes(image)
+            print("截图已保存到:", path.resolve())
         elif args.action in {"click", "scroll"}:
             if args.x is None or args.y is None:
                 raise ValueError("需要 --x 和 --y 原始屏幕像素坐标")
+            before, _ = desktop.capture()
+            before_path = root / f"{args.action}-before.png"
+            before_path.write_bytes(before)
+            print("操作前截图:", before_path.resolve())
             if args.action == "click":
-                desktop.click(args.x, args.y)
+                desktop.click(args.x, args.y, expected=before)
+                print(f"已执行鼠标点击: ({args.x}, {args.y})；不代表网页业务操作已成功")
             else:
                 desktop.scroll(args.x, args.y, ticks=-args.ticks)
+                print(f"已执行向下滚动: ({args.x}, {args.y})，{args.ticks} 刻度")
+            time.sleep(args.settle)
+            try:
+                after, _ = desktop.capture()
+            except RuntimeError:
+                print("输入操作已执行，但窗口发生变化，无法保存操作后截图；请人工核查")
+            else:
+                after_path = root / f"{args.action}-after.png"
+                after_path.write_bytes(after)
+                print("操作后截图:", after_path.resolve())
         else:
             if not args.profile_id or not args.policy_id or not settings.database_url:
                 raise ValueError("run 需要档案ID、策略ID和数据库连接")
