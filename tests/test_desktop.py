@@ -128,6 +128,26 @@ def test_blocked_page_stops_before_click(tmp_path):
         run(desktop, vision, profile, {}, tmp_path, args)
 
 
+def test_unknown_card_is_not_clicked_or_saved(tmp_path):
+    data = screen()
+    data.cards = [data.cards[0].model_copy(update={"company": "未知", "city": "未知"})]
+    desktop = SimpleNamespace(
+        capture=lambda: (png_bytes(), (1000, 1000)),
+        click=lambda *a, **kw: pytest.fail("Unknown card must not be clicked"),
+    )
+    profile = dict(
+        id="p",
+        skills=[],
+        education={},
+        experience_years=0,
+        preferred_cities=[],
+        remote_preference="any",
+    )
+    args = SimpleNamespace(pages=1, jobs=1, right_scroll=None, left_scroll=None)
+    assert run(desktop, SimpleNamespace(inspect=lambda *a: data), profile, {}, tmp_path, args) == 0
+    assert not (tmp_path / "history.json").exists()
+
+
 @pytest.mark.parametrize("action", ["screenshot", "move", "click", "scroll"])
 def test_manual_command_saves_images_and_reports_paths(action, tmp_path, monkeypatch, capsys):
     calls = []

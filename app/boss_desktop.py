@@ -44,6 +44,14 @@ def save_state(path, state):
     temporary.replace(path)
 
 
+def has_card_identity(card):
+    unknown = {"未知", "未知公司", "unknown", "n/a", "不详", "未显示", "无法识别"}
+    return all(
+        normalized(value) not in unknown
+        for value in (card.title, card.company, card.city, card.salary)
+    )
+
+
 def run(desktop, vision, profile, policy, root, args, before_communicate=None, on_analysis=None):
     """Bounded loop. One fresh card click at a time; no stale per-page coordinate batch."""
     simulation = profile.get("facts", {}).get("data_kind") == "simulation"
@@ -74,7 +82,14 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None, o
             left_scroll = args.left_scroll or (
                 screen.list_scroll.center if screen.list_scroll else None
             )
-            card = next((item for item in screen.cards if identity(item) not in seen), None)
+            card = next(
+                (
+                    item
+                    for item in screen.cards
+                    if has_card_identity(item) and identity(item) not in seen
+                ),
+                None,
+            )
             if card is None:
                 break
             key = identity(card)
