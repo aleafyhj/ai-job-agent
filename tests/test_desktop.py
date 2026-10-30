@@ -19,7 +19,7 @@ def screen():
         uncertain=False,
         cards=[card],
         selected=card,
-        detail_text="熟悉Python",
+        detail_text="岗位职责：熟悉Python",
         detail_complete=True,
         detail_start_visible=True,
         hard_conditions="pass",

@@ -17,9 +17,10 @@ from app.collected_jobs import persist_analysis
 from app.core.config import Settings
 from app.database import make_engine
 from app.desktop import Desktop, pixel
+from app.desktop_collection import collect_detail
 from app.desktop_report import ground_card, observe, verify_selection
 from app.mouse_bridge import BridgeMouse
-from app.vision import Vision, score
+from app.vision import Vision, match_report
 
 
 def identity(card):
@@ -104,66 +105,19 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None, o
                 encoding="utf-8",
             )
             time.sleep(args.settle)
-            # New selections normally reset the pane; explicitly return it upward as well.
-            for _ in range(args.detail_scrolls):
-                desktop.scroll(*pixel(right_scroll, size), ticks=10)
-            time.sleep(args.settle)
-            parts = []
-            requirements = {}
-            complete = False
-            hard = "unknown"
-            detail = None
-            for part in range(args.detail_scrolls + 1):
-                detail_image, size = desktop.capture()
-                detail, size, _ = observe(vision, detail_image, evidence, "detail", root)
-                if detail.blocked or detail.uncertain:
-                    raise RuntimeError("详情识别不确定，停止操作")
-                verify_selection(card, detail)
-                if part == 0 and not detail.detail_start_visible:
-                    raise RuntimeError("未确认详情正文顶部，禁止对缺失开头的要求评分")
-                parts.append(detail.detail_text)
-                for item in detail.requirements:
-                    if item.quote not in detail.detail_text:
-                        raise RuntimeError("详情引用不属于可见原文，停止操作")
-                    previous = requirements.get(item.quote)
-                    if previous is not None and previous != item:
-                        raise RuntimeError("重叠截图的要求判断不一致，停止操作")
-                    requirements[item.quote] = item
-                if detail.hard_conditions == "fail":
-                    hard = "fail"
-                elif detail.hard_conditions == "pass" and hard != "fail":
-                    hard = "pass"
-                if detail.detail_complete:
-                    complete = True
-                    break
-                if part < args.detail_scrolls:
-                    desktop.scroll(*pixel(right_scroll, size), ticks=-args.ticks)
-                    time.sleep(args.settle)
-            combined = "\n".join(parts)
-            if complete:
-                detail, _, _ = observe(
-                    vision,
-                    detail_image,
-                    {
-                        **evidence,
-                        "complete_detail_text": combined,
-                    },
-                    "evaluate_all_text",
-                    root,
-                )
-                if detail.blocked or detail.uncertain:
-                    raise RuntimeError("完整详情评估不确定，停止")
-                hard = detail.hard_conditions
-            detail.detail_text = combined
-            if not complete:
-                detail.requirements = list(requirements.values())
-            detail.detail_complete = complete
-            detail.hard_conditions = hard
-            value = score(detail, skills)
+            detail, detail_image, collection_folder = collect_detail(
+                desktop, vision, card, evidence, root, args, evaluate=True
+            )
+            combined = detail.detail_text
+            complete = detail.detail_complete
+            hard = detail.hard_conditions
+            decision = match_report(detail, skills, policy)
+            value = decision["score"]
             processed += 1
             record = {
                 "card": card.model_dump(),
                 "score": value,
+                "decision": decision,
                 "hard_conditions": hard,
                 "profile_version": profile["version_id"],
                 "policy_version": policy["version_id"],
@@ -171,17 +125,13 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None, o
                 "requirements": [item.model_dump() for item in detail.requirements],
                 "detail_text": combined,
                 "detail_complete": complete,
+                "collection_report": str(collection_folder / "collection.json"),
             }
             screenshot_path = root / f"detail-{uuid4().hex}.png"
             screenshot_path.write_bytes(detail_image)
             if on_analysis is not None:
                 record.update(on_analysis(key, card, detail, record, screenshot_path))
-            passes = value is not None and (
-                value >= float(policy["threshold"])
-                if policy["comparison"] == "gte"
-                else value > float(policy["threshold"])
-            )
-            if args.communicate and passes and hard == "pass":
+            if args.communicate and decision["eligible"]:
                 if before_communicate is None:
                     raise RuntimeError("缺少投递前版本校验，禁止沟通")
                 before_communicate()
@@ -246,7 +196,17 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None, o
 def main():
     parser = argparse.ArgumentParser(description="BOSS直聘截图/坐标执行器")
     parser.add_argument(
-        "action", choices=["screenshot", "move", "click", "scroll", "inspect", "click-card", "run"]
+        "action",
+        choices=[
+            "screenshot",
+            "move",
+            "click",
+            "scroll",
+            "inspect",
+            "click-card",
+            "collect-detail",
+            "run",
+        ],
     )
     parser.add_argument("--image", type=Path, help="仅用于 inspect：识别已有图片，不操作桌面")
     parser.add_argument(
@@ -327,6 +287,18 @@ def main():
                 result, _, _ = observe(vision, after, {"skills": []}, "detail", root)
                 verify_selection(card, result)
                 print("已确认：右侧详情切换到选中的职位；没有执行沟通")
+        elif args.action == "collect-detail":
+            vision = Vision(settings)
+            image, _ = desktop.capture()
+            screen, _, _ = observe(vision, image, {"skills": []}, "list", root)
+            if screen.blocked or screen.uncertain or screen.selected is None:
+                raise RuntimeError("无法确认当前选中的职位，未采集")
+            detail, _, folder = collect_detail(
+                desktop, vision, screen.selected, {"skills": []}, root, args
+            )
+            print("正文采集完整:", detail.detail_complete)
+            print("正文文本:", (folder / "detail.txt").resolve())
+            print("未提供能力档案，本次只采集，不评分、不沟通")
         elif args.action == "screenshot":
             image, _ = desktop.capture()
             path = root / "screen.png"

@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app import models as m
+from app.vision import ANALYSIS_VERSION
 
 
 def persist_analysis(engine, settings, profile, policy, key, card, detail, record, image_path):
@@ -126,9 +127,12 @@ def persist_analysis(engine, settings, profile, policy, key, card, detail, recor
             hard_status=detail.hard_conditions,
             eligible=bool(passes and not needs_review and detail.hard_conditions == "pass"),
             requirements=record["requirements"],
-            match_evidence={"skills": profile["skills"]},
+            match_evidence={
+                "skills": profile["skills"],
+                "decision": record.get("decision"),
+            },
             uncertainties=["incomplete_or_unknown_or_stale"] if needs_review else [],
-            prompt_version="desktop-v2",
+            prompt_version=ANALYSIS_VERSION,
             model=settings.vision_model,
             input_hash=hashlib.sha256(
                 (content_hash + profile["version_id"] + policy["version_id"]).encode()
@@ -146,7 +150,7 @@ def persist_analysis(engine, settings, profile, policy, key, card, detail, recor
                     m.analyses.c.job_snapshot_id == snapshot_id,
                     m.analyses.c.profile_version_id == UUID(profile["version_id"]),
                     m.analyses.c.policy_version_id == UUID(policy["version_id"]),
-                    m.analyses.c.prompt_version == "desktop-v2",
+                    m.analyses.c.prompt_version == ANALYSIS_VERSION,
                     m.analyses.c.model == settings.vision_model,
                 )
             )

@@ -62,7 +62,11 @@ def test_visual_collection_dedup_queries_and_stale_analysis(database, tmp_path):
     policy = dict(id=str(policy_id), version_id=str(policy_version), threshold=70, comparison="gte")
     card = Card(title="Python开发", company="Test", city="上海", salary="10K", center=(200, 300))
     detail = SimpleNamespace(detail_text="熟悉Python", detail_complete=True, hard_conditions="pass")
-    record = {"score": 75, "requirements": [{"quote": "熟悉Python", "skill_index": 0}]}
+    record = {
+        "score": 75,
+        "requirements": [{"quote": "熟悉Python", "skill_index": 0}],
+        "decision": {"score": 75, "threshold": 70, "eligible": True, "reasons": []},
+    }
     image = tmp_path / "test.png"
     image.write_bytes(b"test screenshot")
     first = persist_analysis(
@@ -94,6 +98,8 @@ def test_visual_collection_dedup_queries_and_stale_analysis(database, tmp_path):
         )
         response = client.get("/api/v1/analyses/" + first["analysis_id"]).json()
         assert response["eligible"] is True
+        assert response["match_evidence"]["decision"] == record["decision"]
+        assert response["prompt_version"] == "desktop-v3"
         with Session(engine) as session, session.begin():
             version = session.scalar(
                 m.profile_versions.insert()
