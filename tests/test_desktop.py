@@ -7,8 +7,8 @@ from PIL import Image
 
 from app.boss_desktop import main, run
 from app.desktop import Desktop, pixel
-from app.desktop_report import observe, verify_selection
-from app.vision import Card, Requirement, Screen, score
+from app.desktop_report import ground_card, observe, verify_selection
+from app.vision import Card, Requirement, Screen, TitleTarget, score
 
 
 def screen():
@@ -62,7 +62,7 @@ def test_readonly_loop_and_restart_dedup(tmp_path, monkeypatch):
         click=lambda *a, **kw: clicks.append(a),
         scroll=lambda *a, **kw: None,
     )
-    vision = SimpleNamespace(inspect=lambda *a: screen())
+    vision = fake_vision()
     profile = dict(
         id="p",
         version_id="p1",
@@ -146,9 +146,7 @@ def png_bytes():
 
 
 def test_observation_saves_coordinates_and_failure_report(tmp_path):
-    result, size, folder = observe(
-        SimpleNamespace(inspect=lambda *a: screen()), png_bytes(), {}, "list", tmp_path
-    )
+    result, size, folder = observe(fake_vision(), png_bytes(), {}, "list", tmp_path)
     report = json.loads((folder / "report.json").read_text(encoding="utf-8"))
     assert size == (1000, 1000)
     assert report["cards"][0]["pixel"] == [200, 300]
@@ -179,9 +177,7 @@ def test_offline_inspect_never_constructs_desktop(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "app.boss_desktop.Settings", lambda: SimpleNamespace(artifacts_dir=tmp_path)
     )
-    monkeypatch.setattr(
-        "app.boss_desktop.Vision", lambda _: SimpleNamespace(inspect=lambda *a: screen())
-    )
+    monkeypatch.setattr("app.boss_desktop.Vision", lambda _: fake_vision())
     monkeypatch.setattr("sys.argv", ["boss_desktop", "inspect", "--image", str(source)])
     main()
     assert len(list(tmp_path.rglob("report.json"))) == 1
@@ -199,9 +195,7 @@ def test_click_card_uses_fresh_model_coordinates(index, expected_clicks, tmp_pat
     monkeypatch.setattr(
         "app.boss_desktop.Settings", lambda: SimpleNamespace(artifacts_dir=tmp_path)
     )
-    monkeypatch.setattr(
-        "app.boss_desktop.Vision", lambda _: SimpleNamespace(inspect=lambda *a: screen())
-    )
+    monkeypatch.setattr("app.boss_desktop.Vision", lambda _: fake_vision())
     monkeypatch.setattr("app.boss_desktop.time.sleep", lambda _: None)
     monkeypatch.setattr("sys.argv", ["boss_desktop", "click-card", "--card-index", str(index)])
     if expected_clicks:
@@ -212,3 +206,42 @@ def test_click_card_uses_fresh_model_coordinates(index, expected_clicks, tmp_pat
         with pytest.raises(SystemExit):
             main()
     assert len(clicks) == expected_clicks
+
+
+def fake_vision():
+    return SimpleNamespace(
+        inspect=lambda *a: screen(),
+        ground_title=lambda image, card: TitleTarget(
+            title=card.title, center=(500, 500), uncertain=False
+        ),
+    )
+
+
+def test_local_title_mapping_and_conservative_identity(tmp_path):
+    original = screen()
+    card = original.cards[0]
+    point = ground_card(fake_vision(), png_bytes(), card, original.cards, tmp_path)
+    assert point == (200, 300)
+    assert (tmp_path / "title-crop.png").is_file()
+    report = json.loads((tmp_path / "title-target.json").read_text(encoding="utf-8"))
+    assert report["pixel"] == [200, 300]
+    card.city = "深圳-龙岗区"
+    original.selected = card.model_copy(update={"city": "深圳·龙岗区"})
+    verify_selection(card, original)
+    original.selected = card.model_copy(update={"city": "深圳"})
+    verify_selection(card, original)
+    original.selected = card.model_copy(update={"city": "深圳·南山区"})
+    with pytest.raises(RuntimeError, match="city"):
+        verify_selection(card, original)
+    original.selected = card.model_copy(update={"title": "其他职位"})
+    with pytest.raises(RuntimeError, match="title"):
+        verify_selection(card, original)
+    bad = SimpleNamespace(
+        ground_title=lambda *a: TitleTarget(
+            title=card.title,
+            center=(500, 500),
+            uncertain=True,
+        )
+    )
+    with pytest.raises(RuntimeError, match="未执行点击"):
+        ground_card(bad, png_bytes(), card, original.cards, tmp_path)

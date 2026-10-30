@@ -52,6 +52,8 @@ class Desktop:
             if hashlib.sha256(current).digest() != hashlib.sha256(expected).digest():
                 raise RuntimeError("页面已变化，旧截图坐标作废；请重新识别")
         self.gui.moveTo(x, y, duration=0.3)
+        if tuple(self.gui.position()) != (x, y):
+            raise RuntimeError("鼠标实际位置与目标坐标不一致，未点击；请检查桌面焦点或缩放")
         self.check_window()
         self.gui.click()
 

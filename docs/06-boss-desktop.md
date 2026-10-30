@@ -47,6 +47,8 @@ python -m app.boss_desktop click-card --card-index 2
 
 inspect 默认不点击；click-card 在点击后再次调用千问检查右侧身份，只有核对一致才打印确认。遇窗口变化、内容加载未完成或身份无法核对时停止，不自动重复点击。
 
+卡片点击采用两阶段定位：全屏识别卡片后，裁剪附近区域，单独识别标题文字链接，不直接点击卡片中心或学历/经验标签。保存 title-crop.png、title-target.png 和 title-target.json，后者记录裁剪边界及回算后的全屏像素。移动鼠标后读取实际位置核对，再点击。详情身份检查规范化全角括号、空格和地点分隔符；仅一侧缺少行政区时允许城市级匹配，不允许不同明确行政区、标题或公司不一致。
+
 ## 自动循环的数据保存与查询
 
 run 现在会把采集到的职位写入 jobs、正文版本写入 job_snapshots、评分与依据写入 analyses，截图证据写入 artifacts；整个落库操作为一个事务。原文内容不变时复用快照；同档案/策略/模型/提示词版本不重复插入分析。正文不完整、硬条件未知或档案版本失效时记录 needs_review，不视为可投递。终端显示分析进度，history.json 中新增 job_id/snapshot_id/analysis_id。

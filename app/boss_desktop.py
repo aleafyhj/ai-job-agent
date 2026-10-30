@@ -17,7 +17,7 @@ from app.collected_jobs import persist_analysis
 from app.core.config import Settings
 from app.database import make_engine
 from app.desktop import Desktop, pixel
-from app.desktop_report import observe, verify_selection
+from app.desktop_report import ground_card, observe, verify_selection
 from app.vision import Vision, score
 
 
@@ -86,13 +86,15 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None, o
                 )
             ):
                 continue
-            desktop.click(*pixel(card.center, size), expected=image)
+            target = ground_card(vision, image, card, screen.cards, observation_folder)
+            print("精确标题点击坐标:", target)
+            desktop.click(*target, expected=image)
             (observation_folder / "action.json").write_text(
                 json.dumps(
                     {
                         "action": "card_click",
                         "card": card.model_dump(),
-                        "pixel": pixel(card.center, size),
+                        "pixel": target,
                         "status": "input_executed",
                     },
                     ensure_ascii=False,
@@ -302,13 +304,15 @@ def main():
                 if not 1 <= args.card_index <= len(screen.cards):
                     raise ValueError("卡片序号超出本次识别范围")
                 card = screen.cards[args.card_index - 1]
-                desktop.click(*pixel(card.center, size), expected=image)
+                target = ground_card(vision, image, card, screen.cards, folder)
+                print("精确标题点击坐标:", target)
+                desktop.click(*target, expected=image)
                 (folder / "action.json").write_text(
                     json.dumps(
                         {
                             "action": "card_click",
                             "card_index": args.card_index,
-                            "pixel": pixel(card.center, size),
+                            "pixel": target,
                             "status": "input_executed",
                         }
                     ),
