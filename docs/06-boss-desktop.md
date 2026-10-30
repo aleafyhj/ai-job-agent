@@ -64,6 +64,18 @@ Windows参考：[线程级DPI感知](https://learn.microsoft.com/en-us/windows/w
 
 物理位置接口：[SetPhysicalCursorPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setphysicalcursorpos)。此前本机只读检查确认主屏/虚拟桌面均为 2560×1600，光标限制范围覆盖整屏；仅凭这一事实与 SendInput accepted=1，仍不能证明输入实际生效。
 
+### 运行环境隔离排查
+
+`scripts/mouse_doctor.py` 只用标准库，兼容 Python 3.9+，不依赖项目和 PyAutoGUI。默认只读，报告 Python 来源、Windows 会话、窗口站及输入桌面访问状态；不会读取密钥或修改权限。`--probe` 为显式单次移动测试：等待5秒、核对 BOSS 前台窗口后才调用物理位置 API，记录 before/api_success/win32_error/after，不点击、不重试、不调用模型。
+
+本机项目虚拟环境基于 Codex 内置 Python 3.12；另有原有 Anaconda Python 3.9。两者只读检查均显示 Session 1、WinSta0/Default、输入桌面可访问及 2560×1600。尚不能由此确认失败原因。可在用户自己的 PowerShell 对原有 Python 做一次隔离对照：
+
+```powershell
+& 'D:\app\Anaconda3\python.exe' .\scripts\mouse_doctor.py --probe
+```
+
+此命令仅测试标准库输入 API，不用该 Python 3.9 启动完整项目。结果保存在 artifacts/boss-desktop/environment.json 的 probe 部分。若原有 Python 正常而项目环境失败，再处理项目解释器；若同样失败，继续检查输入环境，不能将失败自动归因于 BOSS、DPI或某个软件。
+
 ## 自动循环的数据保存与查询
 
 run 现在会把采集到的职位写入 jobs、正文版本写入 job_snapshots、评分与依据写入 analyses，截图证据写入 artifacts；整个落库操作为一个事务。原文内容不变时复用快照；同档案/策略/模型/提示词版本不重复插入分析。正文不完整、硬条件未知或档案版本失效时记录 needs_review，不视为可投递。终端显示分析进度，history.json 中新增 job_id/snapshot_id/analysis_id。
