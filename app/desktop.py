@@ -2,6 +2,7 @@
 
 import ctypes
 import hashlib
+import json
 import sys
 from ctypes import wintypes
 from io import BytesIO
@@ -21,6 +22,56 @@ class Desktop:
         self.gui.FAILSAFE = True
         self.gui.PAUSE = 0.3
         self.title = title
+        # A library/host can already have fixed process DPI awareness. Bind this
+        # input thread explicitly too, so pointer and screenshot pixels agree.
+        user32 = ctypes.windll.user32
+        user32.SetThreadDpiAwarenessContext.argtypes = [wintypes.HANDLE]
+        user32.SetThreadDpiAwarenessContext.restype = wintypes.HANDLE
+        self.dpi_thread_bound = bool(user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4)))
+
+    def cursor_report(self, x, y):
+        result = {
+            "target": [x, y],
+            "pyautogui_position": list(self.gui.position()),
+            "screen_size": list(self.gui.size()),
+            "thread_dpi_bound": self.dpi_thread_bound,
+        }
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        for name, field in (
+            ("GetCursorPos", "logical_position"),
+            ("GetPhysicalCursorPos", "physical_position"),
+        ):
+            function = getattr(user32, name)
+            function.argtypes = [ctypes.POINTER(wintypes.POINT)]
+            function.restype = wintypes.BOOL
+            point = wintypes.POINT()
+            if function(ctypes.byref(point)):
+                result[field] = [point.x, point.y]
+            else:
+                result[field] = None
+                result[field + "_error"] = ctypes.get_last_error()
+        return result
+
+    def move(self, x, y, *, diagnostics=None):
+        self.check_window()
+        self.point(x, y)
+        self.gui.moveTo(x, y, duration=0.3)
+        actual = tuple(self.gui.position())
+        # Capture native and library values only on mismatch; never infer a scale
+        # from one failed move or silently click a different screen position.
+        if actual != (x, y):
+            report = self.cursor_report(x, y)
+            if diagnostics is not None:
+                (diagnostics / "pointer.json").write_text(
+                    json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+            raise RuntimeError(
+                f"鼠标未到目标，未点击：目标=({x}, {y})，实际={actual}，"
+                f"物理坐标={report['physical_position']}，"
+                f"线程DPI绑定={report['thread_dpi_bound']}。诊断已写入 pointer.json"
+            )
+        self.check_window()
+        return actual
 
     def check_window(self):
         user32 = ctypes.windll.user32
@@ -79,9 +130,7 @@ class Desktop:
                 if diagnostics is not None:
                     (diagnostics / "guard-current.png").write_bytes(current)
                 raise
-        self.gui.moveTo(x, y, duration=0.3)
-        if tuple(self.gui.position()) != (x, y):
-            raise RuntimeError("鼠标实际位置与目标坐标不一致，未点击；请检查桌面焦点或缩放")
+        self.move(x, y, diagnostics=diagnostics)
         self.check_window()
         if (
             expected is not None
@@ -96,7 +145,7 @@ class Desktop:
             raise ValueError("每次滚动刻度须为 -10..-1 或 1..10")
         self.check_window()
         self.point(x, y)
-        self.gui.moveTo(x, y, duration=0.3)
+        self.move(x, y)
         self.gui.scroll(ticks)
 
 

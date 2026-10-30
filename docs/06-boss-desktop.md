@@ -16,6 +16,9 @@
 # 截取当前主屏幕，输出 artifacts/boss-desktop/screen.png
 .\.venv\Scripts\python.exe -m app.boss_desktop screenshot
 
+# 不调用模型、不点击：单独核对鼠标能否移动到原始屏幕像素坐标
+python -m app.boss_desktop move --x 553 --y 716
+
 # 只识别当前截图并标注卡片序号/像素坐标，不点击，不需要档案ID
 python -m app.boss_desktop inspect
 
@@ -50,6 +53,10 @@ python -m app.boss_desktop click-card --card-index 2
 inspect 默认不点击；click-card 在点击后再次调用千问检查右侧身份，只有核对一致才打印确认。遇窗口变化、内容加载未完成或身份无法核对时停止，不自动重复点击。
 
 卡片点击采用两阶段定位：全屏识别卡片后，裁剪附近区域，单独识别标题文字链接，不直接点击卡片中心或学历/经验标签。保存 title-crop.png、title-target.png 和 title-target.json，后者记录裁剪边界及回算后的全屏像素。移动鼠标后读取实际位置核对，再点击。详情身份检查规范化全角括号、空格和地点分隔符；仅一侧缺少行政区时允许城市级匹配，不允许不同明确行政区、标题或公司不一致。
+
+鼠标位置异常排查：先执行 move，它不调用千问、不会点击。启动后5秒切到 BOSS 窗口并保持前台，期间不要操作鼠标。失败时终端输出目标、实际位置及 Windows 物理坐标，pointer.json 保存在 boss-desktop 根目录（自动点击时保存在本次观察目录）。日志只包含坐标/屏幕尺寸/线程DPI状态，不含凭据。代码在导入输入库后显式设置当前线程为 Per-Monitor V2，减少宿主已有DPI配置带来的混用；设置是否成功会写入诊断。坐标不一致仍然停止，不能通过忽略校验或盲猜缩放倍数解决。
+
+Windows参考：[线程级DPI感知](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setthreaddpiawarenesscontext)。
 
 ## 自动循环的数据保存与查询
 

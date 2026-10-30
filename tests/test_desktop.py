@@ -108,11 +108,12 @@ def test_blocked_page_stops_before_click(tmp_path):
         run(desktop, vision, profile, {}, tmp_path, args)
 
 
-@pytest.mark.parametrize("action", ["screenshot", "click", "scroll"])
+@pytest.mark.parametrize("action", ["screenshot", "move", "click", "scroll"])
 def test_manual_command_saves_images_and_reports_paths(action, tmp_path, monkeypatch, capsys):
     calls = []
     fake = SimpleNamespace(
         capture=lambda: (b"test-image", (1000, 1000)),
+        move=lambda *a, **kw: calls.append("move") or (200, 300),
         click=lambda *a, **kw: calls.append("click"),
         scroll=lambda *a, **kw: calls.append("scroll"),
     )
@@ -297,3 +298,25 @@ def test_target_guard_rejects_screen_resize():
     Image.new("RGB", (800, 800)).save(stream, format="PNG")
     with pytest.raises(RuntimeError, match="屏幕尺寸"):
         verify_target_image(png_bytes(), stream.getvalue(), 500, 500)
+
+
+def test_pointer_mismatch_records_values_without_click(tmp_path):
+    desktop = Desktop.__new__(Desktop)
+    desktop.check_window = lambda: 1
+    desktop.point = lambda *a: None
+    clicks = []
+    desktop.gui = SimpleNamespace(
+        moveTo=lambda *a, **kw: None, position=lambda: (400, 500), click=lambda: clicks.append(1)
+    )
+    desktop.cursor_report = lambda x, y: {
+        "target": [x, y],
+        "pyautogui_position": [400, 500],
+        "physical_position": [400, 500],
+        "thread_dpi_bound": True,
+    }
+    with pytest.raises(RuntimeError, match="实际=\\(400, 500\\)"):
+        desktop.click(553, 716, diagnostics=tmp_path)
+    assert clicks == []
+    report = json.loads((tmp_path / "pointer.json").read_text(encoding="utf-8"))
+    assert report["target"] == [553, 716]
+    assert report["physical_position"] == [400, 500]

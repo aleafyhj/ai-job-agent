@@ -245,7 +245,7 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None, o
 def main():
     parser = argparse.ArgumentParser(description="BOSS直聘截图/坐标执行器")
     parser.add_argument(
-        "action", choices=["screenshot", "click", "scroll", "inspect", "click-card", "run"]
+        "action", choices=["screenshot", "move", "click", "scroll", "inspect", "click-card", "run"]
     )
     parser.add_argument("--image", type=Path, help="仅用于 inspect：识别已有图片，不操作桌面")
     parser.add_argument(
@@ -328,15 +328,18 @@ def main():
             path = root / "screen.png"
             path.write_bytes(image)
             print("截图已保存到:", path.resolve())
-        elif args.action in {"click", "scroll"}:
+        elif args.action in {"move", "click", "scroll"}:
             if args.x is None or args.y is None:
                 raise ValueError("需要 --x 和 --y 原始屏幕像素坐标")
             before, _ = desktop.capture()
             before_path = root / f"{args.action}-before.png"
             before_path.write_bytes(before)
             print("操作前截图:", before_path.resolve())
-            if args.action == "click":
-                desktop.click(args.x, args.y, expected=before)
+            if args.action == "move":
+                actual = desktop.move(args.x, args.y, diagnostics=root)
+                print("已核对鼠标坐标:", actual, "；仅移动，未点击，未调用千问")
+            elif args.action == "click":
+                desktop.click(args.x, args.y, expected=before, diagnostics=root)
                 print(f"已执行鼠标点击: ({args.x}, {args.y})；不代表网页业务操作已成功")
             else:
                 desktop.scroll(args.x, args.y, ticks=-args.ticks)
