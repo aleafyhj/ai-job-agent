@@ -9,6 +9,8 @@ from io import BytesIO
 
 from PIL import Image
 
+from app.windows_input import WindowsMouse
+
 
 class Desktop:
     def __init__(self, title="BOSS直聘"):
@@ -28,6 +30,7 @@ class Desktop:
         user32.SetThreadDpiAwarenessContext.argtypes = [wintypes.HANDLE]
         user32.SetThreadDpiAwarenessContext.restype = wintypes.HANDLE
         self.dpi_thread_bound = bool(user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4)))
+        self.mouse = WindowsMouse()
 
     def cursor_report(self, x, y):
         result = {
@@ -55,12 +58,22 @@ class Desktop:
     def move(self, x, y, *, diagnostics=None):
         self.check_window()
         self.point(x, y)
-        self.gui.moveTo(x, y, duration=0.3)
-        actual = tuple(self.gui.position())
+        self.gui.failSafeCheck()
+        try:
+            actual = self.mouse.move(x, y)
+        except RuntimeError:
+            if diagnostics is not None:
+                report = self.cursor_report(x, y)
+                report["input_event"] = self.mouse.last_event
+                (diagnostics / "pointer.json").write_text(
+                    json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+            raise
         # Capture native and library values only on mismatch; never infer a scale
         # from one failed move or silently click a different screen position.
         if actual != (x, y):
             report = self.cursor_report(x, y)
+            report["input_event"] = self.mouse.last_event
             if diagnostics is not None:
                 (diagnostics / "pointer.json").write_text(
                     json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -138,7 +151,8 @@ class Desktop:
             and self.window_signature() != old_frame[1]
         ):
             raise RuntimeError("鼠标移动期间浏览器位置已变化，未点击")
-        self.gui.click()
+        self.gui.failSafeCheck()
+        self.mouse.click()
 
     def scroll(self, x, y, ticks=-3):
         if not -10 <= ticks <= 10 or ticks == 0:
@@ -146,7 +160,8 @@ class Desktop:
         self.check_window()
         self.point(x, y)
         self.move(x, y)
-        self.gui.scroll(ticks)
+        self.gui.failSafeCheck()
+        self.mouse.scroll(ticks)
 
 
 def pixel(point, size):

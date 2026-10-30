@@ -274,14 +274,13 @@ def test_card_guard_ignores_only_unrelated_changes(change, mode, should_click, t
     desktop.window_signature = lambda: new_signature
     desktop.point = lambda x, y: None
     clicks = []
-    desktop.gui = SimpleNamespace(
-        moveTo=lambda *a, **kw: None, position=lambda: (500, 500), click=lambda: clicks.append(1)
-    )
+    desktop.gui = SimpleNamespace(failSafeCheck=lambda: None, position=lambda: (500, 500))
 
     def capture():
         desktop._last_frame = (hashlib.sha256(current).digest(), new_signature)
         return current, (1000, 1000)
 
+    desktop.mouse = SimpleNamespace(move=lambda x, y: (x, y), click=lambda: clicks.append(1))
     desktop.capture = capture
     if should_click:
         desktop.click(500, 500, expected=before, target_only=mode, diagnostics=tmp_path)
@@ -305,8 +304,9 @@ def test_pointer_mismatch_records_values_without_click(tmp_path):
     desktop.check_window = lambda: 1
     desktop.point = lambda *a: None
     clicks = []
-    desktop.gui = SimpleNamespace(
-        moveTo=lambda *a, **kw: None, position=lambda: (400, 500), click=lambda: clicks.append(1)
+    desktop.gui = SimpleNamespace(failSafeCheck=lambda: None, position=lambda: (400, 500))
+    desktop.mouse = SimpleNamespace(
+        move=lambda x, y: (400, 500), last_event={"accepted": 1}, click=lambda: clicks.append(1)
     )
     desktop.cursor_report = lambda x, y: {
         "target": [x, y],

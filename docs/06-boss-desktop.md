@@ -58,6 +58,10 @@ inspect 默认不点击；click-card 在点击后再次调用千问检查右侧�
 
 Windows参考：[线程级DPI感知](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setthreaddpiawarenesscontext)。
 
+当前输入实现已改用 app/windows_input.py 的标准 SendInput，截图和角落停止检查仍使用 PyAutoGUI。绝对位置根据虚拟桌面范围换算到 Windows 的 0..65535 坐标，并核对移动后的 GetPhysicalCursorPos。点击/滚轮检查系统接受的事件数量；返回零、部分接受或物理坐标不一致均停止，不进行自动重试。pointer.json 新增 input_event（backend/requested/accepted/win32_error/input_struct_size）。输入插入成功不代表网页业务成功，后续仍检查职位身份/回执。此方案不改变系统权限或安全设置，SendInput 自身也受 Windows 输入限制，错误码不能唯一证明原因。真实用户环境需先用 move 确认。
+
+参考：[SendInput 返回值与限制](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)、[绝对鼠标坐标](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-mouseinput)。
+
 ## 自动循环的数据保存与查询
 
 run 现在会把采集到的职位写入 jobs、正文版本写入 job_snapshots、评分与依据写入 analyses，截图证据写入 artifacts；整个落库操作为一个事务。原文内容不变时复用快照；同档案/策略/模型/提示词版本不重复插入分析。正文不完整、硬条件未知或档案版本失效时记录 needs_review，不视为可投递。终端显示分析进度，history.json 中新增 job_id/snapshot_id/analysis_id。
