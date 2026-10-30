@@ -59,8 +59,29 @@ def test_native_move_and_scroll_event_shapes():
         }[index],
     )
     mouse.position = lambda: (553, 716)
-    assert mouse.move(553, 716) == (553, 716)
+    assert mouse.move_sendinput(553, 716) == (553, 716)
     assert packets[0][3] == 0xC001
     mouse.scroll(-3)
     assert packets[1][2] == (-360 & 0xFFFFFFFF)
     assert packets[1][3] == 0x0800
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+def test_physical_movement_checks_return_and_records_before_after(accepted):
+    mouse = WindowsMouse.__new__(WindowsMouse)
+    positions = iter([(53, 202), (553, 716)])
+    mouse.position = lambda: next(positions)
+    calls = []
+    mouse.user32 = SimpleNamespace(
+        SetPhysicalCursorPos=lambda x, y: calls.append((x, y)) or accepted
+    )
+    if accepted:
+        assert mouse.move(553, 716) == (553, 716)
+        assert mouse.last_event["samples"] == [[553, 716]]
+    else:
+        with pytest.raises(RuntimeError, match="拒绝物理坐标移动"):
+            mouse.move(553, 716)
+        assert mouse.last_event["samples"] == []
+    assert calls == [(553, 716)]
+    assert mouse.last_event["before"] == [53, 202]
+    assert mouse.last_event["api_success"] is accepted

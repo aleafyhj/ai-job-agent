@@ -58,9 +58,11 @@ inspect 默认不点击；click-card 在点击后再次调用千问检查右侧�
 
 Windows参考：[线程级DPI感知](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setthreaddpiawarenesscontext)。
 
-当前输入实现已改用 app/windows_input.py 的标准 SendInput，截图和角落停止检查仍使用 PyAutoGUI。绝对位置根据虚拟桌面范围换算到 Windows 的 0..65535 坐标，并核对移动后的 GetPhysicalCursorPos。点击/滚轮检查系统接受的事件数量；返回零、部分接受或物理坐标不一致均停止，不进行自动重试。pointer.json 新增 input_event（backend/requested/accepted/win32_error/input_struct_size）。输入插入成功不代表网页业务成功，后续仍检查职位身份/回执。此方案不改变系统权限或安全设置，SendInput 自身也受 Windows 输入限制，错误码不能唯一证明原因。真实用户环境需先用 move 确认。
+当前 app/windows_input.py 使用 SetPhysicalCursorPos 直接设置屏幕物理像素，再通过 GetPhysicalCursorPos 核对；不再让生产流程依赖 SendInput 绝对坐标换算。pointer.json 的 input_event 包含 backend/target/before/api_success/win32_error/samples，可以区分 API 拒绝、鼠标始终不动和移动后又偏离；不通过多次输入自动纠偏。按钮与滚轮仍使用标准 SendInput，检查接受事件数量，不盲目重试。截图和角落停止检查保留 PyAutoGUI。移动/事件插入成功不代表网页业务成功，后续仍检查职位身份和回执。代码不改变系统权限、安全设置或鼠标限制范围，真实用户环境仍需先用 move 确认。
 
 参考：[SendInput 返回值与限制](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)、[绝对鼠标坐标](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-mouseinput)。
+
+物理位置接口：[SetPhysicalCursorPos](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setphysicalcursorpos)。此前本机只读检查确认主屏/虚拟桌面均为 2560×1600，光标限制范围覆盖整屏；仅凭这一事实与 SendInput accepted=1，仍不能证明输入实际生效。
 
 ## 自动循环的数据保存与查询
 

@@ -1,4 +1,4 @@
-"""Checked Windows SendInput mouse backend; does not bypass OS input restrictions."""
+"""Checked physical cursor movement and SendInput buttons; respects OS restrictions."""
 
 import ctypes
 import time
@@ -41,6 +41,8 @@ class WindowsMouse:
         self.user32.SendInput.restype = wintypes.UINT
         self.user32.GetPhysicalCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
         self.user32.GetPhysicalCursorPos.restype = wintypes.BOOL
+        self.user32.SetPhysicalCursorPos.argtypes = [wintypes.INT, wintypes.INT]
+        self.user32.SetPhysicalCursorPos.restype = wintypes.BOOL
         self.last_event = None
 
     def send(self, events):
@@ -71,6 +73,30 @@ class WindowsMouse:
         return point.x, point.y
 
     def move(self, x, y):
+        before = self.position()
+        ctypes.set_last_error(0)
+        accepted = bool(self.user32.SetPhysicalCursorPos(x, y))
+        error = ctypes.get_last_error()
+        self.last_event = {
+            "backend": "SetPhysicalCursorPos",
+            "target": [x, y],
+            "before": list(before),
+            "api_success": accepted,
+            "win32_error": error,
+            "samples": [],
+        }
+        if not accepted:
+            raise RuntimeError(f"Windows拒绝物理坐标移动，Win32错误={error}；未点击，不自动重试")
+        for _ in range(10):
+            actual = self.position()
+            self.last_event["samples"].append(list(actual))
+            if actual == (x, y):
+                return actual
+            time.sleep(0.02)
+        return actual
+
+    def move_sendinput(self, x, y):
+        """Kept for isolated backend tests; not used for production pointer movement."""
         bounds = tuple(self.user32.GetSystemMetrics(index) for index in (76, 77, 78, 79))
         nx, ny = absolute_point(x, y, bounds)
         self.send([(nx, ny, 0, 0x0001 | 0x8000 | 0x4000)])
