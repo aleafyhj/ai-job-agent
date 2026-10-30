@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     database_url: SecretStr | None = None
     api_token: SecretStr | None = Field(default=None, min_length=32)
     artifacts_dir: Path = PROJECT_ROOT / "artifacts"
+    mouse_python: Path | None = None
     vision_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     vision_model: str = "qwen3-vl-plus"
     vision_api_key: SecretStr | None = Field(

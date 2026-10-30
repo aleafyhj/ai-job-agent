@@ -1,5 +1,26 @@
 # BOSS直聘：截图与真实鼠标模式
 
+## 独立鼠标服务（本机已验证）
+
+2026-10-30：项目虚拟环境通过本机独立 Python 3.9 鼠标服务执行输入，截图、千问分析和数据库操作继续使用原项目虚拟环境。已通过项目 `move --x 1100 --y 700` 和 `click-card --card-index 1` 实测：鼠标坐标核对成功，第一张卡片被点击，右侧切换为“AI智能体开发人员 / 4–7K”，程序确认职位身份一致。没有执行沟通或上传简历。
+
+重启服务后再次验证移动成功，并通过项目 `scroll --x 800 --y 900 --ticks 1` 确认页面实际向下滚动，保存 `scroll-before.png` / `scroll-after.png`。62 项回归测试通过（包含隔离 PostgreSQL 测试），Ruff 检查通过。
+
+当前机器的 `.env` 已设置 `JOB_AGENT_MOUSE_PYTHON=D:/app/Anaconda3/python.exe`。每次电脑重启后，先在项目目录启动服务一次（重复运行会复用存活服务）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-mouse.ps1
+# 原项目虚拟环境照常使用，不需要切换到 Python 3.9
+python -m app.boss_desktop move --x 1100 --y 700
+python -m app.boss_desktop click-card --card-index 1
+```
+
+启动脚本默认使用本机 `D:\app\Anaconda3\python.exe`，可用 `-MousePython` 指定另一条已验证路径，并保持 `.env` 配置一致。服务通过本机回环端口接收带本地随机密钥的 JSON 请求；端口、PID、密钥和启动错误日志位于被 Git 忽略的 `artifacts/boss-desktop`。服务不需要千问密钥或数据库凭据。`scripts/windows_mouse_bridge.py --status` 只检查服务，不操作鼠标。关闭服务可按 `mouse-service.json` 的 PID 核对命令行后停止该工作进程。
+
+服务拒绝前台窗口不符、位置变化、屏幕角落和无效滚轮参数；通信中断或结果未知时不自动重试。主程序仍保留截图变化与职位身份校验。启动脚本须独立运行，不能用每次请求创建短命子进程替代本机已验证的服务方式。此前失败的确切系统原因尚未确定，不能据此断言所有 Python 3.12 都无法控制鼠标。
+
+## 命令与流程
+
 已按新的需求增加独立命令行执行器，绕开 DOM 抓取这一实现路径。鼠标操作不能保证不触发平台风控；验证码、登录异常和弹窗不自动处理。用户先手动登录并打开职位搜索结果，将浏览器放到 Windows 主屏幕前台。
 
 代码：app/desktop.py（截图、鼠标、滚轮、DPI/窗口校验），app/vision.py（千问视觉、结构化结果和评分），app/boss_desktop.py（循环与本地记录）。没有通过截图自动上传简历，也没有自动填写聊天内容。

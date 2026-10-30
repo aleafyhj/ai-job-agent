@@ -47,7 +47,7 @@ class WindowsMouse:
 
     def send(self, events):
         packets = (Input * len(events))()
-        for packet, (x, y, data, flags) in zip(packets, events, strict=True):
+        for packet, (x, y, data, flags) in zip(packets, events):
             packet.type = 0  # INPUT_MOUSE
             packet.mi = MouseInput(x, y, data, flags, 0, 0)
         ctypes.set_last_error(0)

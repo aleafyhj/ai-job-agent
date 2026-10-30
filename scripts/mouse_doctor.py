@@ -67,7 +67,7 @@ def collect():
     return result
 
 
-def probe(x, y):
+def probe(x, y, wait_seconds=5, announce=True, expected_title="BOSS直聘"):
     """One explicit move, on a BOSS foreground window; never click or retry."""
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     user32.GetForegroundWindow.restype = wintypes.HANDLE
@@ -75,11 +75,12 @@ def probe(x, y):
     user32.GetPhysicalCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
     user32.SetPhysicalCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
     user32.SetPhysicalCursorPos.restype = wintypes.BOOL
-    print("5秒内切换到 BOSS直聘窗口。只移动一次，不点击、不调用模型。", flush=True)
-    time.sleep(5)
+    if announce:
+        print("5秒内切换到 BOSS直聘窗口。只移动一次，不点击、不调用模型。", flush=True)
+    time.sleep(wait_seconds)
     title = ctypes.create_unicode_buffer(1024)
     user32.GetWindowTextW(user32.GetForegroundWindow(), title, len(title))
-    if "BOSS直聘".casefold() not in title.value.casefold():
+    if not expected_title or expected_title.casefold() not in title.value.casefold():
         raise RuntimeError("前台不是 BOSS直聘，未移动")
     width, height = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
     if not 0 < x < width - 1 or not 0 < y < height - 1:
@@ -92,6 +93,8 @@ def probe(x, y):
         return [point.x, point.y]
 
     before = position()
+    if before in ([0, 0], [width - 1, 0], [0, height - 1], [width - 1, height - 1]):
+        raise RuntimeError("鼠标位于屏幕角落，紧急停止")
     ctypes.set_last_error(0)
     accepted = bool(user32.SetPhysicalCursorPos(x, y))
     error = ctypes.get_last_error()

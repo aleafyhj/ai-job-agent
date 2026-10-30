@@ -18,6 +18,7 @@ from app.core.config import Settings
 from app.database import make_engine
 from app.desktop import Desktop, pixel
 from app.desktop_report import ground_card, observe, verify_selection
+from app.mouse_bridge import BridgeMouse
 from app.vision import Vision, score
 
 
@@ -286,6 +287,9 @@ def main():
         desktop = None
         if args.image is None:
             desktop = Desktop(args.title)
+            if getattr(settings, "mouse_python", None) is not None:
+                desktop.mouse = BridgeMouse(settings.mouse_python, args.title)
+                print("鼠标工作进程:", settings.mouse_python)
             print("请在5秒内切换到已手动登录的 BOSS直聘职位列表；Ctrl+C停止")
             time.sleep(5)
         if args.action in {"inspect", "click-card"}:

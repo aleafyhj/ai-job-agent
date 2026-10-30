@@ -1,4 +1,6 @@
 .venv/
+.venv-native/
+.python-runtime/
 .tools/
 .uv-cache/
 __pycache__/
