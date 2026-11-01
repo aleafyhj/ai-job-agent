@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert
 from app import models as m
 from app.api.dependencies import DB, require_token
 from app.api.resources import Cursor, Limit, get_row, page_query, policy_read, profile_read
+from app.desktop_collection import normalize_detail_text
 from app.matching import assess
 from app.schemas import AnalysisReviewWrite, AnalysisRunWrite
 from app.vision import ANALYSIS_VERSION, Vision
@@ -162,7 +163,7 @@ def analyze_saved_job(
         return analysis_read(session, existing)
 
     normalized = snapshot["normalized"] or {}
-    text = str(normalized.get("detail_text") or "").strip()
+    text = normalize_detail_text(str(normalized.get("detail_text") or ""))
     if not text:
         raise HTTPException(409, "职位快照没有可分析的正文")
     evidence = profile.model_dump(

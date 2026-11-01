@@ -6,7 +6,7 @@ import pytest
 from PIL import Image
 from pydantic import ValidationError
 
-from app.desktop_collection import collect_detail
+from app.desktop_collection import collect_detail, normalize_detail_text
 from app.vision import Box, Card, Requirement, Screen, match_report
 
 
@@ -92,6 +92,27 @@ def test_scroll_without_progress_never_implies_complete(tmp_path, monkeypatch):
     report = json.loads((folder / "collection.json").read_text(encoding="utf-8"))
     assert report["status"] == "incomplete"
     assert report["stop_reason"] == "no_scroll_progress"
+
+
+def test_viewport_overlap_is_removed_before_full_text_evaluation():
+    text = (
+        "岗位职责：\n1. 开发API\n2. 编写测试\n\n2. 编写测试\n任职要求：\n熟悉 Python\n熟悉  Python"
+    )
+    assert normalize_detail_text(text) == (
+        "岗位职责：\n1. 开发API\n2. 编写测试\n\n任职要求：\n熟悉 Python"
+    )
+
+
+def test_near_duplicate_scrolled_line_keeps_more_complete_version():
+    short = (
+        "3. 熟悉大语言模型原理，掌握至少一种AI智能体开发框架"
+        "（LangChain/AutoGPT/MetaGPT/Dify），有RAG微调经验者优先。"
+    )
+    complete = (
+        "3. 熟悉大语言模型原理，掌握至少一种AI智能体开发框架"
+        "（LangChain/AutoGPT/MetaGPT/Dify），有RAG微调、工具调用实战项目经验者优先。"
+    )
+    assert normalize_detail_text(f"任职要求：\n{short}\n{complete}") == (f"任职要求：\n{complete}")
 
 
 def test_changed_job_stops_collection_and_saves_failure(tmp_path, monkeypatch):

@@ -1,4 +1,4 @@
-# 全文匹配与复核（desktop-v4）
+# 全文匹配与复核（desktop-v6）
 
 截图模型仅转录可见正文。收集完整正文后，单独发送正文和最小能力档案给千问，返回结构化要求；Python 校验依据、计算分数及资格。不再要求末屏截图同时承担全文评分和职位身份重新识别。
 
@@ -32,7 +32,7 @@ soft/other 的 importance 固定为 preferred 占位，不表示它们是技术�
 
 分析接口 match_evidence.decision 包含 score、score_upper_bound、weights、hard_conditions、needs_review、reasons 及校验后的逐项 requirements。analyses.requirements 保留模型原始结构化结果，decision.requirements 保留校验后的类别/状态及原始技能证据，供对比追溯。
 
-提示词/评分版本为 desktop-v4。旧分析保留，但接口 is_current/eligible 会将旧版本视为过期；run 的历史去重也要求评分版本一致。需要复核的结果在数据库中为 needs_review，具体原因保存至 uncertainties。没有增加数据库表或覆盖既有分析。
+提示词/评分版本为 desktop-v6。滚动截图合并后先按 Unicode/空白规范键删除重复行，高度相似的长行保留信息更完整的一条；格式差异映射回真实连续原文。正文区标题之前的真实短技能标签保留展示但以 `scoring_exclusion=header_skill_tags` 排除计分，带动作语义的岗位使命不会误排除。技术复合项必须同时具备对应概念证据，OR 只作用于直接技能选项，不能用 Python/C++ 语言经验代替同句的算法、编码规范、RAG、Agent 等能力。直接技能名还必须由正确的 canonical_name 引用。旧分析保留，但接口 is_current/eligible 会将旧版本视为过期；run 的历史去重也要求评分版本一致。需要复核的结果在数据库中为 needs_review，具体原因保存至 uncertainties。
 
 ## 离线回放
 

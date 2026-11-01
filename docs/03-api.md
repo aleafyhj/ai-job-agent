@@ -1,6 +1,6 @@
 # 接口契约 v1
 
-desktop-v4 增量：分析的 match_evidence.decision 新增 score_upper_bound、weights（total/covered/unknown）、hard_conditions、needs_review；requirements 含 category、status、skill_indices、profile_field、weight、skill_evidence 等校验后的依据。模型原始要求仍保留在顶层 requirements。旧提示词版本分析 is_current=false、eligible=false；需复核结果 status=needs_review，uncertainties 保存原因。接口路径和鉴权方式不变。
+desktop-v6 增量：分析的 match_evidence.decision 包含 score_upper_bound、weights（total/covered/unknown）、hard_conditions、needs_review；requirements 含 category、status、skill_indices、profile_field、weight、skill_evidence 和 scoring_exclusion 等校验后依据。正文滚动重叠或高度相似的行先去重，真正的顶部技能标签不计分但使命描述保留；语言 OR 选项只放宽语言名匹配，不能放宽同句的数据结构、算法或编码规范证据；格式差异可映射回真实职位原文。模型原始要求仍保留在顶层 requirements。旧提示词版本分析 is_current=false、eligible=false；需复核结果 status=needs_review，uncertainties 保存原因。
 
 正文采集增量：CLI `collect-detail` 支持无档案的当前职位逐屏采集，输出本地报告；`run` 的分析详情在 `match_evidence.decision` 返回确定性评分说明（score/threshold/comparison/eligible/reasons/requirements，逐项含 quote/importance/weight/matched/skill_index/skill_name）。旧分析可能没有该字段。此字段保留当时决策；是否仍有效以分析接口顶层 `is_current` 和 `eligible` 为准。
 

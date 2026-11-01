@@ -118,11 +118,11 @@ def test_or_clause_accepts_a_supported_option():
     assert result["eligible"]
 
 
-def test_duplicate_quotes_are_not_double_weighted():
+def test_duplicate_quotes_are_safely_deduplicated():
     item = requirement("Python", skill_indices=[0])
     result = evaluate(item, item)
     assert result["weights"]["total"] == 3
-    assert not result["eligible"]
+    assert result["eligible"]
 
 
 @pytest.mark.parametrize("comparison,eligible", [("gte", True), ("gt", False)])
@@ -192,6 +192,64 @@ def test_rag_reference_cannot_claim_finetuning_without_evidence():
     assert result["requirements"][0]["status"] == "unknown"
     assert "unsupported_skill_concept" in result["reasons"]
     assert not result["eligible"]
+
+
+def test_language_evidence_cannot_cover_algorithms_and_coding_standards():
+    quote = "熟悉Python，熟练掌握数据结构和常用算法设计，具备良好的编码规范"
+    result = evaluate(requirement(quote, skill_indices=[0]))
+    assert result["requirements"][0]["status"] == "unknown"
+    assert "unsupported_skill_concept" in result["reasons"]
+    assert "unsplit_technical_requirement" in result["reasons"]
+
+
+def test_wrong_canonical_skill_reference_is_rejected_even_when_evidence_mentions_name():
+    profile = {
+        "skills": [
+            {
+                "canonical_name": "Python",
+                "level": "proficient",
+                "years": 2,
+                "evidence": "Python后端项目",
+            },
+            {
+                "canonical_name": "Spring",
+                "level": "basic",
+                "years": None,
+                "evidence": "熟悉Spring、Git等工具",
+            },
+        ]
+    }
+    result = evaluate(requirement("使用Python和Git开发", skill_indices=[0, 1]), profile=profile)
+    assert result["requirements"][0]["status"] == "unknown"
+    assert "unsupported_skill_concept" in result["reasons"]
+
+
+def test_leading_skill_tags_are_visible_but_excluded_from_score():
+    text = "职位描述\nC/C++ Java Python\n学历要求：\n本科\n专业要求：\n熟悉Python开发"
+    result = evaluate(
+        requirement("C/C++ Java Python", skill_indices=[0]),
+        requirement("熟悉Python开发", skill_indices=[0]),
+        text=text,
+    )
+    assert result["requirements"][0]["scoring_exclusion"] == "header_skill_tags"
+    assert result["requirements"][0]["weight"] == 0
+    assert result["weights"]["total"] == 3
+    assert result["score"] == 100
+
+
+def test_pre_section_mission_is_not_mistaken_for_keyword_tags():
+    quote = "将工程知识转化为Agent、RAG和自动化工具"
+    text = f"岗位使命：\n{quote}\n岗位职责：\n1. 交付原型"
+    result = evaluate(requirement(quote), text=text)
+    assert result["requirements"][0]["scoring_exclusion"] is None
+    assert result["weights"]["total"] == 3
+
+
+def test_formatting_only_quote_change_is_grounded_to_source():
+    source = "熟悉 Python、Git 及 API 开发"
+    result = evaluate(requirement("熟悉Python、Git及API开发", skill_indices=[0]), text=source)
+    assert result["requirements"][0]["quote"] == source
+    assert "quote_not_in_source" not in result["reasons"]
 
 
 def test_non_scored_context_accepts_no_importance_and_stays_zero_weight():

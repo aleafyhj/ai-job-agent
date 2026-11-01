@@ -3,6 +3,8 @@
 import json
 import re
 import time
+import unicodedata
+from difflib import SequenceMatcher
 from uuid import uuid4
 
 from app.desktop import pixel
@@ -22,6 +24,45 @@ def has_detail_start(detail):
         )
         and (first_number is None or int(first_number[1]) == 1)
     )
+
+
+def normalize_detail_text(text):
+    """Remove viewport overlap while preserving the first exact source line."""
+    seen = set()
+    lines = []
+    blank = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            if lines and not blank:
+                lines.append("")
+            blank = True
+            continue
+        blank = False
+        key = "".join(unicodedata.normalize("NFKC", line).split()).casefold()
+        if key in seen:
+            continue
+        similar = None
+        if len(key) >= 40:
+            for index, existing in enumerate(lines):
+                existing_key = "".join(unicodedata.normalize("NFKC", existing).split()).casefold()
+                ratio = SequenceMatcher(None, key, existing_key, autojunk=False).ratio()
+                if len(existing_key) >= 40 and ratio >= 0.9:
+                    similar = index
+                    break
+        if similar is not None:
+            if len(line) > len(lines[similar]):
+                seen.discard(
+                    "".join(unicodedata.normalize("NFKC", lines[similar]).split()).casefold()
+                )
+                lines[similar] = line
+                seen.add(key)
+            continue
+        seen.add(key)
+        lines.append(line)
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\n".join(lines)
 
 
 def collect_detail(desktop, vision, card, evidence, root, args, *, evaluate=False):
@@ -79,7 +120,8 @@ def collect_detail(desktop, vision, card, evidence, root, args, *, evaluate=Fals
             scroll(detail, size, -args.ticks)
             detail, image, size = read("detail")
 
-        combined = report["detail_text"]
+        combined = normalize_detail_text(report["detail_text"])
+        report["detail_text"] = combined
         if not combined.strip():
             raise RuntimeError("职位正文为空，停止采集")
         if complete and evaluate and hasattr(vision, "evaluate_text"):
