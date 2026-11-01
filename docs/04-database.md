@@ -23,6 +23,7 @@ enqueue_application 原子完成去重、当前版本校验、策略/会话状�
 | job_snapshots | job_id, content_hash, raw_artifact_id, normalized JSONB, captured_at, extractor_version | UNIQUE(job_id,content_hash)；不可变，normalized 保留单位和原文 |
 | run_jobs | run_id, job_id, snapshot_id | UNIQUE(run_id,job_id)，记录本轮实际看到的版本 |
 | analyses | job_snapshot_id, profile_version_id, policy_version_id, status, score?, hard_status, eligible bool, requirements JSONB, match_evidence JSONB, uncertainties JSONB, prompt_version, model, input_hash, error JSONB | UNIQUE(job_snapshot_id,profile_version_id,policy_version_id,prompt_version,model)；score 0–100 |
+| analysis_reviews | analysis_id, decision, reviewer, notes?, requirement_reviews JSONB | 人工复核只追加不覆盖；decision 为 approved/rejected/needs_changes，保留逐项结论 |
 | applications | profile_id, job_id, platform_account_id, analysis_id, resume_id, run_id?, status, blocked_reason?, required_inputs JSONB, submitted_at?, confirmation_ref? | UNIQUE(profile_id,job_id)，跨同平台不同账户也防重复；一次申请可有多次 attempt |
 | application_attempts | application_id, attempt_no int, status, form_snapshot JSONB, answers JSONB, started_at, finished_at?, result JSONB, artifact_ids JSONB | UNIQUE(application_id,attempt_no)，status prepared/submitting/confirmed/not_submitted/unknown |
 | tasks | type, payload JSONB, run_id?, application_id?, status, priority int, available_at, lease_owner?, lease_expires_at?, heartbeat_at?, attempt_count, max_attempts, progress JSONB, error JSONB | payload 仅 ID 和版本，不放简历/会话；任务恢复按类型执行 |
@@ -54,6 +55,7 @@ erDiagram
     job_snapshots ||--o{ analyses : analyzed
     profile_versions ||--o{ analyses : evidence
     policy_versions ||--o{ analyses : rules
+    analyses ||--o{ analysis_reviews : reviewed
     analyses ||--o{ applications : basis
     jobs ||--o{ applications : receives
     resumes ||--o{ applications : uses

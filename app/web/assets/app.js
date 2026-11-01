@@ -1,7 +1,7 @@
 const state = {
   token: sessionStorage.getItem("jobAgentToken") || "",
   profiles: [], policies: [], jobs: [], analyses: [],
-  selectedProfile: null, selectedJob: null, profileEtag: null,
+  selectedProfile: null, selectedJob: null, selectedAnalysis: null, profileEtag: null,
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -81,6 +81,9 @@ async function loadAll() {
 function scoreClass(score) { return score !== null && Number(score) >= 70 ? "" : "low"; }
 function analysisPill(item) {
   if (!item.is_current) return '<span class="pill muted">已过期</span>';
+  if (item.latest_review?.decision === "approved") return '<span class="pill">人工已确认</span>';
+  if (item.latest_review?.decision === "rejected") return '<span class="pill danger">人工已否决</span>';
+  if (item.latest_review?.decision === "needs_changes") return '<span class="pill warning">复核待修改</span>';
   if (item.status === "needs_review") return '<span class="pill warning">需复核</span>';
   if (item.eligible) return '<span class="pill">可申请</span>';
   return '<span class="pill danger">未通过</span>';
@@ -101,7 +104,9 @@ function renderRecentAnalyses() {
 function renderProfiles() {
   const root = $("#profileList");
   const filter = $("#analysisProfileFilter");
-  filter.innerHTML = '<option value="">全部档案</option>' + state.profiles.map(item => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join("");
+  const selected = filter.value;
+  filter.innerHTML = '<option value="">选择分析档案</option>' + state.profiles.map(item => `<option value="${esc(item.id)}">${esc(item.name)}</option>`).join("");
+  if (state.profiles.some(item => item.id === selected)) filter.value = selected;
   if (!state.profiles.length) { root.className = "stack-list empty-state"; root.textContent = "暂无档案，先创建一个空白档案"; return; }
   root.className = "stack-list";
   root.innerHTML = state.profiles.map(item => `
@@ -165,6 +170,10 @@ async function importResume(resumeId) {
 
 function renderPolicies() {
   const root = $("#policyList");
+  const select = $("#analysisPolicySelect");
+  const selected = select.value;
+  select.innerHTML = '<option value="">选择匹配策略</option>' + state.policies.map(item => `<option value="${esc(item.id)}">${esc(item.name)} · ${esc(item.comparison === "gte" ? "≥" : ">")}${esc(item.threshold)}</option>`).join("");
+  if (state.policies.some(item => item.id === selected)) select.value = selected;
   if (!state.policies.length) { root.className = "card-grid empty-state"; root.textContent = "暂无策略"; return; }
   root.className = "card-grid";
   root.innerHTML = state.policies.map(item => `
@@ -189,7 +198,47 @@ function renderJobs() {
 
 function selectJob(id) {
   state.selectedJob = state.jobs.find(item => item.id === id) || null;
+  state.selectedAnalysis = null;
   renderJobs(); renderJobDetail();
+}
+
+const reasonLabels = {
+  uncertain_extraction: "模型提取存在不确定项",
+  multiple_roles_require_selection: "正文包含多个岗位方向",
+  quote_not_in_source: "要求证据不在职位原文",
+  duplicate_requirement: "职位要求重复",
+  category_conflict: "要求分类冲突",
+  unsplit_technical_requirement: "复合技术要求尚未拆分",
+  invalid_skill_reference: "技能证据引用无效",
+  unsupported_skill_concept: "档案证据不足以支持该技术",
+  required_skill_evidence_unknown: "必需技能证据未知",
+  hard_conditions_unknown: "硬条件信息未知",
+  hard_conditions_fail: "硬条件不满足",
+  no_technical_requirements: "未提取到有效技术要求",
+  below_threshold: "匹配分低于阈值",
+  incomplete_job_detail: "职位正文采集不完整",
+};
+const statusLabels = {matched: "已满足", unmatched: "不满足", unknown: "未知"};
+const categoryLabels = {technical: "技术", hard: "硬条件", soft: "软能力", other: "其他"};
+
+function renderAnalysisDetail(item) {
+  if (!item) return "";
+  const decision = item.match_evidence?.decision || {};
+  const requirements = decision.requirements || [];
+  const reasons = decision.reasons || item.uncertainties || [];
+  const latest = item.latest_review;
+  const evidence = requirements.length ? requirements.map((requirement, index) => {
+    const skills = (requirement.skill_evidence || []).map(skill => `${esc(skill.canonical_name)}：${esc(skill.evidence)}`).join("<br>") || "无档案证据";
+    const saved = latest?.requirement_reviews?.find(review => review.quote === requirement.quote);
+    return `<article class="evidence-item">
+      <div class="evidence-head"><strong>${esc(categoryLabels[requirement.category] || requirement.category)} · ${esc(requirement.importance === "required" ? "必需" : "优先")}</strong><span class="pill ${requirement.status === "matched" ? "" : requirement.status === "unknown" ? "warning" : "danger"}">${esc(statusLabels[requirement.status] || requirement.status)}</span></div>
+      <blockquote>${esc(requirement.quote)}</blockquote><p><b>档案依据：</b>${skills}</p>
+      <div class="review-control"><select data-requirement-review="${index}" aria-label="复核该要求"><option value="unclear" ${!saved || saved.decision === "unclear" ? "selected" : ""}>暂不确定</option><option value="confirmed" ${saved?.decision === "confirmed" ? "selected" : ""}>判断正确</option><option value="rejected" ${saved?.decision === "rejected" ? "selected" : ""}>判断错误</option></select><input data-requirement-note="${index}" maxlength="2000" value="${esc(saved?.notes || "")}" placeholder="可选：记录修正意见"></div>
+    </article>`;
+  }).join("") : '<div class="empty-state">没有可展示的结构化要求</div>';
+  return `<div class="detail-section"><h3>评分证据</h3><div class="analysis-summary"><span class="score ${scoreClass(item.score)}">${item.score === null ? "?" : Math.round(Number(item.score))}</span><div><strong>${esc(item.profile_name)}</strong><p>理论上限 ${decision.score_upper_bound == null ? "?" : Math.round(Number(decision.score_upper_bound))} · 硬条件 ${esc(item.hard_status)} · 阈值 ${esc(decision.comparison === "gt" ? ">" : "≥")}${esc(decision.threshold ?? "?")}</p></div></div><div class="reason-list">${reasons.map(reason => `<span class="pill warning" title="${esc(reason)}">${esc(reasonLabels[reason] || reason)}</span>`).join("") || '<span class="pill">没有复核原因</span>'}</div></div>
+    <div class="detail-section"><h3>逐项要求与依据</h3><div class="evidence-grid">${evidence}</div></div>
+    <form id="analysisReviewForm" class="review-box" data-analysis-id="${esc(item.id)}"><h3>人工复核</h3><p>复核记录独立保存，不会覆盖模型结果，也不会触发“立即沟通”。</p><label>总体结论<select name="decision"><option value="needs_changes" ${!latest || latest.decision === "needs_changes" ? "selected" : ""}>需要修正或继续确认</option><option value="approved" ${latest?.decision === "approved" ? "selected" : ""}>确认分析合理</option><option value="rejected" ${latest?.decision === "rejected" ? "selected" : ""}>否决本次分析</option></select></label><label>复核备注<textarea name="notes" maxlength="4000" placeholder="说明模型判断正确或错误的原因">${esc(latest?.notes || "")}</textarea></label><div class="dialog-actions"><button class="button primary" type="submit">保存复核记录</button></div></form>`;
 }
 
 function renderJobDetail() {
@@ -200,9 +249,63 @@ function renderJobDetail() {
   root.innerHTML = `
     <div class="detail-head"><div><p class="eyebrow">${esc(item.platform_key)}</p><h2>${esc(item.title)}</h2><p>${esc(item.company_name)} · 最近采集 ${date(item.last_seen_at)}</p></div><span class="pill ${item.status !== "active" ? "muted" : ""}">${esc(item.status)}</span></div>
     <div class="detail-section"><h3>匹配分析</h3><div class="stack-list">${analyses.length ? analyses.map(result => `
-      <div class="list-row"><span class="score ${scoreClass(result.score)}">${result.score === null ? "?" : Math.round(Number(result.score))}</span><span class="grow"><strong>${esc(result.profile_name)}</strong><small>${esc(result.status)} · ${esc(result.hard_status)} · ${date(result.created_at)}</small></span>${analysisPill(result)}</div>`).join("") : '<div class="empty-state">该职位暂无分析</div>'}</div></div>
+      <button class="list-row ${state.selectedAnalysis?.id === result.id ? "active" : ""}" data-analysis-id="${esc(result.id)}"><span class="score ${scoreClass(result.score)}">${result.score === null ? "?" : Math.round(Number(result.score))}</span><span class="grow"><strong>${esc(result.profile_name)}</strong><small>${esc(result.status)} · ${esc(result.hard_status)} · ${date(result.created_at)}</small></span>${analysisPill(result)}</button>`).join("") : '<div class="empty-state">该职位暂无分析</div>'}</div></div>
+    ${renderAnalysisDetail(state.selectedAnalysis)}
     <div class="detail-section"><h3>采集快照</h3><pre id="jobSnapshot"></pre></div>`;
   $("#jobSnapshot").textContent = JSON.stringify(item.snapshot?.normalized || {}, null, 2);
+  const form = $("#analysisReviewForm"); if (form) form.addEventListener("submit", submitReview);
+}
+
+async function selectAnalysis(id) {
+  try {
+    state.selectedAnalysis = (await api(`/analyses/${id}`)).data;
+    renderJobDetail();
+  } catch (error) { toast(error.message, true); }
+}
+
+async function submitReview(event) {
+  event.preventDefault();
+  const form = event.currentTarget, button = $("button[type=submit]", form);
+  const requirements = state.selectedAnalysis?.match_evidence?.decision?.requirements || [];
+  const requirementReviews = requirements.map((item, index) => ({
+    quote: item.quote,
+    decision: $(`[data-requirement-review="${index}"]`, form).value,
+    notes: $(`[data-requirement-note="${index}"]`, form).value.trim(),
+  }));
+  button.disabled = true;
+  try {
+    await api(`/analyses/${form.dataset.analysisId}/reviews`, {method: "POST", body: JSON.stringify({decision: form.elements.decision.value, notes: form.elements.notes.value.trim(), requirement_reviews: requirementReviews})});
+    const refreshed = (await api(`/analyses/${form.dataset.analysisId}`)).data;
+    state.selectedAnalysis = refreshed;
+    state.analyses = state.analyses.map(item => item.id === refreshed.id ? refreshed : item);
+    renderAll(); toast("人工复核记录已保存");
+  } catch (error) { toast(error.message, true); }
+  finally { button.disabled = false; }
+}
+
+async function reanalyzeAll() {
+  const profileId = $("#analysisProfileFilter").value;
+  const policyId = $("#analysisPolicySelect").value;
+  if (!profileId || !policyId) { toast("请先选择真实档案和匹配策略", true); return; }
+  const button = $("#reanalyzeButton"), progress = $("#analysisProgress");
+  button.disabled = true; progress.classList.remove("hidden");
+  let completed = 0, failed = 0;
+  for (const job of state.jobs) {
+    progress.textContent = `正在分析 ${completed + failed + 1}/${state.jobs.length}：${job.title}`;
+    try {
+      await api(`/jobs/${job.id}/analyses`, {method: "POST", body: JSON.stringify({profile_id: profileId, policy_id: policyId})});
+      completed += 1;
+    } catch (error) {
+      failed += 1;
+      progress.textContent = `${job.title} 分析失败：${error.message}`;
+    }
+  }
+  const selectedProfile = profileId, selectedPolicy = policyId;
+  await loadAll();
+  $("#analysisProfileFilter").value = selectedProfile; $("#analysisPolicySelect").value = selectedPolicy;
+  await filterAnalyses();
+  progress.classList.remove("hidden"); progress.textContent = `重新分析完成：成功 ${completed}，失败 ${failed}。不会触发立即沟通。`;
+  button.disabled = false;
 }
 
 function renderAll() { renderRecentAnalyses(); renderProfiles(); renderPolicies(); renderJobs(); renderProfileDetail(); renderJobDetail(); }
@@ -211,6 +314,7 @@ async function filterAnalyses() {
   try {
     const value = $("#analysisProfileFilter").value;
     state.analyses = (await api(`/analyses?limit=100${value ? `&profile_id=${encodeURIComponent(value)}` : ""}`)).data.items;
+    state.selectedAnalysis = null;
     renderRecentAnalyses(); renderJobs(); renderJobDetail();
   } catch (error) { toast(error.message, true); }
 }
@@ -228,6 +332,7 @@ document.addEventListener("click", event => {
   const profile = event.target.closest("[data-profile-id]"); if (profile) selectProfile(profile.dataset.profileId);
   const resume = event.target.closest("[data-import-resume]"); if (resume) importResume(resume.dataset.importResume).catch(error => toast(error.message, true));
   const job = event.target.closest("[data-job-id]"); if (job) selectJob(job.dataset.jobId);
+  const analysis = event.target.closest("[data-analysis-id]"); if (analysis && !analysis.closest("form")) selectAnalysis(analysis.dataset.analysisId);
   const analysisJob = event.target.closest("[data-analysis-job]"); if (analysisJob) { showView("jobs"); selectJob(analysisJob.dataset.analysisJob); }
   if (event.target.closest("[data-close-dialog]")) event.target.closest("dialog").close();
 });
@@ -238,6 +343,7 @@ $("#menuButton").addEventListener("click", () => $(".sidebar").classList.toggle(
 $("#newProfileButton").addEventListener("click", () => $("#profileDialog").showModal());
 $("#newPolicyButton").addEventListener("click", () => $("#policyDialog").showModal());
 $("#analysisProfileFilter").addEventListener("change", filterAnalyses);
+$("#reanalyzeButton").addEventListener("click", reanalyzeAll);
 
 $("#tokenForm").addEventListener("submit", async event => {
   event.preventDefault(); state.token = $("#tokenInput").value.trim();

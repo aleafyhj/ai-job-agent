@@ -113,6 +113,23 @@ class ResumeImportRead(BaseModel):
     profile: ProfileRead
 
 
+class AnalysisRunWrite(InputModel):
+    profile_id: UUID
+    policy_id: UUID
+
+
+class RequirementReview(InputModel):
+    quote: str = Field(min_length=1, max_length=2000)
+    decision: Literal["confirmed", "rejected", "unclear"]
+    notes: str = Field(default="", max_length=2000)
+
+
+class AnalysisReviewWrite(InputModel):
+    decision: Literal["approved", "rejected", "needs_changes"]
+    notes: str = Field(default="", max_length=4000)
+    requirement_reviews: list[RequirementReview] = Field(default_factory=list, max_length=150)
+
+
 T = TypeVar("T")
 
 

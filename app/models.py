@@ -265,6 +265,14 @@ analyses = table(
         "eligible",
     ),
 )
+analysis_reviews = table(
+    "analysis_reviews",
+    ref("analysis_id", "analyses.id"),
+    *state("approved rejected needs_changes", "needs_changes", "decision"),
+    col("reviewer", sa.String(100), default=sa.text("'local_user'")),
+    col("notes", nullable=True),
+    doc("requirement_reviews", "[]"),
+)
 applications = table(
     "applications",
     ref("profile_id", "profiles.id"),
@@ -417,6 +425,12 @@ sa.Index(
     analyses.c.status,
     analyses.c.score.desc(),
 )
+sa.Index(
+    "ix_analysis_reviews_latest",
+    analysis_reviews.c.analysis_id,
+    analysis_reviews.c.created_at.desc(),
+    analysis_reviews.c.id.desc(),
+)
 sa.Index("ix_applications_status_created", applications.c.status, applications.c.created_at)
 sa.Index(
     "ix_applications_account_submitted",
@@ -442,4 +456,5 @@ IMMUTABLE_TABLES = (
     "resumes",
     "resume_imports",
     "job_snapshots",
+    "analysis_reviews",
 )

@@ -51,9 +51,10 @@ desktop-v4 增量：分析的 match_evidence.decision 新增 score_upper_bound�
 | POST `/runs/{id}/cancel` | `{}` | 200，进入 cancelling/cancelled |
 | GET `/jobs` | `platform_key,min_score,status,run_id`及分页 | 职位列表；分数取绑定档案的最新有效分析，不能混用候选人 |
 | GET `/jobs/{id}` | 无 | 职位、最新快照、来源和有效状态 |
-| POST `/jobs/{id}/analyses` | `profile_id,job_snapshot_id,policy_id` | 202 `analysis_id,task_id`，固定当前档案/规则版本 |
+| POST `/jobs/{id}/analyses` | `profile_id,policy_id` | 201 同步分析最新快照；相同职位快照/档案版本/策略版本/模型重复请求返回既有结果和 200 |
 | GET `/analyses` | cursor,limit,profile_id?,status? | 分页返回分析、职位/公司/档案/策略名称及当前有效性 |
-| GET `/analyses/{id}` | 无 | Analysis，含逐项要求与评分 |
+| GET `/analyses/{id}` | 无 | Analysis，含逐项要求、评分、档案证据和最新人工复核 |
+| POST `/analyses/{id}/reviews` | `decision,notes,requirement_reviews[]` | 201 追加人工复核；不覆盖模型分析，不改变沟通资格 |
 | POST `/policies` | PolicyWrite | 201 Policy |
 | GET `/policies` | cursor,limit | 策略分页列表 |
 | GET `/policies/{id}` | 无 | Policy |

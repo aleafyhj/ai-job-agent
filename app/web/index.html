@@ -84,7 +84,8 @@
       </section>
 
       <section id="jobsView" class="view">
-        <div class="section-toolbar"><div><p class="eyebrow">BOSS JOBS</p><h2>职位与分析</h2><p>查看桌面采集器保存的职位正文、分数和复核状态。</p></div><select id="analysisProfileFilter" aria-label="按档案筛选"><option value="">全部档案</option></select></div>
+        <div class="section-toolbar"><div><p class="eyebrow">BOSS JOBS</p><h2>职位与分析</h2><p>用真实档案重新分析已采集职位，并逐项核对模型证据。</p></div><div class="toolbar-actions"><select id="analysisProfileFilter" aria-label="分析档案"><option value="">选择分析档案</option></select><select id="analysisPolicySelect" aria-label="匹配策略"><option value="">选择匹配策略</option></select><button id="reanalyzeButton" class="button primary">重新分析全部职位</button></div></div>
+        <div id="analysisProgress" class="notice hidden" role="status"></div>
         <div class="master-detail jobs-layout">
           <div class="panel list-panel"><div id="jobList" class="stack-list empty-state">暂无职位</div></div>
           <div id="jobDetail" class="panel detail-panel empty-state">从左侧选择一个职位</div>
