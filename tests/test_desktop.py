@@ -9,7 +9,7 @@ from PIL import Image
 from app.boss_desktop import identity, main, run
 from app.desktop import Desktop, pixel, verify_target_image
 from app.desktop_report import ground_card, observe, verify_selection
-from app.vision import Card, Requirement, Screen, TitleTarget, score
+from app.vision import Box, Card, Requirement, Screen, TitleTarget, score
 
 
 def screen():
@@ -110,6 +110,85 @@ def test_readonly_loop_and_restart_dedup(tmp_path, monkeypatch):
     (tmp_path / "history.json").write_text(json.dumps(records), encoding="utf-8")
     assert run(desktop, vision, profile, policy, tmp_path, args) == 0
     assert len(clicks) == 2
+
+
+def test_eligible_job_persists_communication_before_click_and_confirms(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.boss_desktop.time.sleep", lambda _: None)
+    clicks = []
+    events = []
+    desktop = SimpleNamespace(
+        capture=lambda: (png_bytes(), (1000, 1000)),
+        click=lambda *a, **kw: clicks.append(a),
+        scroll=lambda *a, **kw: None,
+    )
+
+    def inspect(*args):
+        result = screen()
+        purpose = args[-1]
+        if purpose == "confirm_communication_target":
+            result.communicate = Box(center=(800, 100))
+        elif purpose == "communication_result":
+            result.communication_confirmed = True
+        return result
+
+    profile = dict(
+        id="p",
+        version_id="p1",
+        skills=[{"evidence": "项目经验"}],
+        education={},
+        experience_years=2,
+        preferred_cities=[],
+        remote_preference="any",
+    )
+    policy = dict(
+        version_id="v1",
+        threshold=70,
+        comparison="gte",
+        daily_limit=1,
+        timezone="Asia/Shanghai",
+    )
+    args = SimpleNamespace(
+        pages=1,
+        jobs=1,
+        detail_scrolls=1,
+        settle=1,
+        ticks=3,
+        communicate=True,
+        right_scroll=None,
+        left_scroll=[200, 500],
+    )
+
+    def communication(stage, record, image, coordinate, result, communication_id):
+        events.append((stage, len(clicks), result))
+        return {"id": "communication-1"}
+
+    assert (
+        run(
+            desktop,
+            SimpleNamespace(
+                inspect=inspect,
+                ground_title=lambda image, card: TitleTarget(
+                    title=card.title, center=(500, 500), uncertain=False
+                ),
+            ),
+            profile,
+            policy,
+            tmp_path,
+            args,
+            lambda: None,
+            lambda *a: {"analysis_id": "analysis-1", "job_id": "job-1"},
+            communication,
+        )
+        == 1
+    )
+    assert [item[0] for item in events] == ["pending", "confirmed"]
+    assert events[0][1] == 1  # Card click happened; communication click has not.
+    assert events[1][1] == 2
+    record = next(
+        iter(json.loads((tmp_path / "history.json").read_text(encoding="utf-8")).values())
+    )
+    assert record["state"] == "communication_confirmed"
+    assert record["communication_id"] == "communication-1"
 
 
 def test_blocked_page_stops_before_click(tmp_path):

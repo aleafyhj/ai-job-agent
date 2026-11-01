@@ -273,6 +273,24 @@ analysis_reviews = table(
     col("notes", nullable=True),
     doc("requirement_reviews", "[]"),
 )
+communications = table(
+    "communications",
+    ref("profile_id", "profiles.id"),
+    ref("job_id", "jobs.id"),
+    ref("analysis_id", "analyses.id"),
+    *state("pending confirmed unknown", "pending"),
+    col("local_date", sa.Date),
+    col("policy_timezone"),
+    ref("before_artifact_id", "artifacts.id"),
+    ref("after_artifact_id", "artifacts.id", nullable=True),
+    doc("button_coordinate"),
+    doc("result"),
+    col("attempted_at", sa.DateTime(timezone=True), default=sa.func.now()),
+    timestamp("confirmed_at"),
+    sa.UniqueConstraint("analysis_id"),
+    sa.UniqueConstraint("profile_id", "job_id"),
+    check("status <> 'confirmed' OR confirmed_at IS NOT NULL", "confirmation_evidence"),
+)
 applications = table(
     "applications",
     ref("profile_id", "profiles.id"),
@@ -430,6 +448,11 @@ sa.Index(
     analysis_reviews.c.analysis_id,
     analysis_reviews.c.created_at.desc(),
     analysis_reviews.c.id.desc(),
+)
+sa.Index(
+    "ix_communications_profile_day",
+    communications.c.profile_id,
+    communications.c.local_date,
 )
 sa.Index("ix_applications_status_created", applications.c.status, applications.c.created_at)
 sa.Index(

@@ -64,7 +64,7 @@
             <ul class="guard-list">
               <li><span class="check">✓</span><div><strong>证据校验</strong><small>技能和岗位需求均需保留原文依据</small></div></li>
               <li><span class="check">✓</span><div><strong>70分阈值</strong><small>不确定项不会被当作已满足</small></div></li>
-              <li><span class="check">✓</span><div><strong>沟通保持关闭</strong><small>当前控制台不提供真实投递按钮</small></div></li>
+              <li><span class="check">✓</span><div><strong>半自动沟通</strong><small>手动打开职位列表，桌面执行器仅点击立即沟通</small></div></li>
             </ul>
           </article>
         </div>
@@ -79,7 +79,7 @@
       </section>
 
       <section id="policiesView" class="view">
-        <div class="section-toolbar"><div><p class="eyebrow">MATCH RULES</p><h2>匹配策略</h2><p>设置匹配阈值、每日上限和自动申请开关。</p></div><button id="newPolicyButton" class="button primary">新建策略</button></div>
+        <div class="section-toolbar"><div><p class="eyebrow">MATCH RULES</p><h2>匹配策略</h2><p>设置匹配阈值、每日上限和自动沟通开关。</p></div><button id="newPolicyButton" class="button primary">新建策略</button></div>
         <div id="policyList" class="card-grid empty-state">暂无策略</div>
       </section>
 
@@ -116,7 +116,7 @@
       <div><p class="eyebrow">NEW POLICY</p><h2>创建匹配策略</h2></div>
       <label>策略名称<input name="name" maxlength="100" required value="BOSS直聘默认策略"></label>
       <div class="form-row"><label>匹配阈值<input name="threshold" type="number" min="0" max="100" step="0.1" value="70" required></label><label>每日上限<input name="dailyLimit" type="number" min="1" max="100" value="20" required></label></div>
-      <label class="checkbox"><input name="autoApply" type="checkbox"><span>允许自动申请（当前桌面沟通仍不会由控制台触发）</span></label>
+      <label class="checkbox"><input name="autoApply" type="checkbox"><span>允许桌面执行器点击“立即沟通”（不会发送消息或投递简历）</span></label>
       <div class="dialog-actions"><button type="button" class="button ghost" data-close-dialog>取消</button><button type="submit" class="button primary">创建策略</button></div>
     </form>
   </dialog>

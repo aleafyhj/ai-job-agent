@@ -2,6 +2,8 @@
 
 desktop-v6 增量：分析的 match_evidence.decision 包含 score_upper_bound、weights（total/covered/unknown）、hard_conditions、needs_review；requirements 含 category、status、skill_indices、profile_field、weight、skill_evidence 和 scoring_exclusion 等校验后依据。正文滚动重叠或高度相似的行先去重，真正的顶部技能标签不计分但使命描述保留；语言 OR 选项只放宽语言名匹配，不能放宽同句的数据结构、算法或编码规范证据；格式差异可映射回真实职位原文。模型原始要求仍保留在顶层 requirements。旧提示词版本分析 is_current=false、eligible=false；需复核结果 status=needs_review，uncertainties 保存原因。
 
+半自动沟通增量：`GET /communications` 查询桌面执行器写入的立即沟通记录，可按 `profile_id` 和 `status`（pending/confirmed/unknown）筛选；分析详情的 `communication` 返回对应记录。接口只读，管理页不能直接触发鼠标点击。点击前写 pending 和截图，点击后只转换为 confirmed/unknown；任何已有状态均禁止自动重复沟通。
+
 正文采集增量：CLI `collect-detail` 支持无档案的当前职位逐屏采集，输出本地报告；`run` 的分析详情在 `match_evidence.decision` 返回确定性评分说明（score/threshold/comparison/eligible/reasons/requirements，逐项含 quote/importance/weight/matched/skill_index/skill_name）。旧分析可能没有该字段。此字段保留当时决策；是否仍有效以分析接口顶层 `is_current` 和 `eligible` 为准。
 
 已实现：health/ready；profiles 的创建、列表、详情、更新；简历上传、结构化导入、列表、指定默认简历与鉴权下载；policies 的创建、列表、详情、更新。下面表格中的其他业务接口仍为后续设计，不代表已经可调用。当前以 `/docs` 中生成的 OpenAPI 为实际已实现接口清单。

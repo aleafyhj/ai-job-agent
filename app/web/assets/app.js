@@ -80,12 +80,15 @@ async function loadAll() {
 
 function scoreClass(score) { return score !== null && Number(score) >= 70 ? "" : "low"; }
 function analysisPill(item) {
+  if (item.communication?.status === "confirmed") return '<span class="pill">已点击沟通</span>';
+  if (item.communication?.status === "unknown") return '<span class="pill danger">沟通结果未知</span>';
+  if (item.communication?.status === "pending") return '<span class="pill warning">沟通待核查</span>';
   if (!item.is_current) return '<span class="pill muted">已过期</span>';
   if (item.latest_review?.decision === "approved") return '<span class="pill">人工已确认</span>';
   if (item.latest_review?.decision === "rejected") return '<span class="pill danger">人工已否决</span>';
   if (item.latest_review?.decision === "needs_changes") return '<span class="pill warning">复核待修改</span>';
   if (item.status === "needs_review") return '<span class="pill warning">需复核</span>';
-  if (item.eligible) return '<span class="pill">可申请</span>';
+  if (item.eligible) return '<span class="pill">可沟通</span>';
   return '<span class="pill danger">未通过</span>';
 }
 
@@ -227,6 +230,9 @@ function renderAnalysisDetail(item) {
   const requirements = decision.requirements || [];
   const reasons = decision.reasons || item.uncertainties || [];
   const latest = item.latest_review;
+  const communication = item.communication;
+  const communicationLabels = {pending: "已预留，尚待确认", confirmed: "已确认点击立即沟通", unknown: "点击结果未知，禁止自动重试"};
+  const communicationCard = communication ? `<div class="detail-section"><h3>立即沟通记录</h3><div class="analysis-card"><span class="pill ${communication.status === "unknown" ? "danger" : communication.status === "pending" ? "warning" : ""}">${esc(communicationLabels[communication.status] || communication.status)}</span><p>记录时间：${date(communication.attempted_at)} · 本地日期：${esc(communication.local_date)}</p><p>该记录只表示点击“立即沟通”，不表示已发送消息或投递简历。</p></div></div>` : "";
   const evidence = requirements.length ? requirements.map((requirement, index) => {
     const skills = (requirement.skill_evidence || []).map(skill => `${esc(skill.canonical_name)}：${esc(skill.evidence)}`).join("<br>") || "无档案证据";
     const saved = latest?.requirement_reviews?.find(review => review.quote === requirement.quote);
@@ -237,6 +243,7 @@ function renderAnalysisDetail(item) {
     </article>`;
   }).join("") : '<div class="empty-state">没有可展示的结构化要求</div>';
   return `<div class="detail-section"><h3>评分证据</h3><div class="analysis-summary"><span class="score ${scoreClass(item.score)}">${item.score === null ? "?" : Math.round(Number(item.score))}</span><div><strong>${esc(item.profile_name)}</strong><p>理论上限 ${decision.score_upper_bound == null ? "?" : Math.round(Number(decision.score_upper_bound))} · 硬条件 ${esc(item.hard_status)} · 阈值 ${esc(decision.comparison === "gt" ? ">" : "≥")}${esc(decision.threshold ?? "?")}</p></div></div><div class="reason-list">${reasons.map(reason => `<span class="pill warning" title="${esc(reason)}">${esc(reasonLabels[reason] || reason)}</span>`).join("") || '<span class="pill">没有复核原因</span>'}</div></div>
+    ${communicationCard}
     <div class="detail-section"><h3>逐项要求与依据</h3><div class="evidence-grid">${evidence}</div></div>
     <form id="analysisReviewForm" class="review-box" data-analysis-id="${esc(item.id)}"><h3>人工复核</h3><p>复核记录独立保存，不会覆盖模型结果，也不会触发“立即沟通”。</p><label>总体结论<select name="decision"><option value="needs_changes" ${!latest || latest.decision === "needs_changes" ? "selected" : ""}>需要修正或继续确认</option><option value="approved" ${latest?.decision === "approved" ? "selected" : ""}>确认分析合理</option><option value="rejected" ${latest?.decision === "rejected" ? "selected" : ""}>否决本次分析</option></select></label><label>复核备注<textarea name="notes" maxlength="4000" placeholder="说明模型判断正确或错误的原因">${esc(latest?.notes || "")}</textarea></label><div class="dialog-actions"><button class="button primary" type="submit">保存复核记录</button></div></form>`;
 }

@@ -85,6 +85,14 @@ def analysis_read(session, row):
         .one_or_none()
     )
     result["latest_review"] = dict(review) if review is not None else None
+    communication = (
+        session.execute(
+            sa.select(m.communications).where(m.communications.c.analysis_id == row["id"])
+        )
+        .mappings()
+        .one_or_none()
+    )
+    result["communication"] = dict(communication) if communication is not None else None
     return result
 
 
@@ -114,6 +122,41 @@ def list_analyses(
 @router.get("/analyses/{analysis_id}")
 def read_analysis(analysis_id: UUID, session: DB):
     return analysis_read(session, get_row(session, m.analyses, analysis_id))
+
+
+def communication_read(session, row):
+    result = dict(row)
+    job = get_row(session, m.jobs, row["job_id"])
+    profile = get_row(session, m.profiles, row["profile_id"])
+    result.update(
+        job_title=job["title"],
+        company_name=job["company_name"],
+        profile_name=profile["name"],
+    )
+    return result
+
+
+@router.get("/communications")
+def list_communications(
+    session: DB,
+    cursor: Cursor = None,
+    limit: Limit = 20,
+    profile_id: UUID | None = None,
+    status: str | None = None,
+):
+    statement = sa.select(m.communications)
+    if profile_id is not None:
+        statement = statement.where(m.communications.c.profile_id == profile_id)
+    if status is not None:
+        if status not in {"pending", "confirmed", "unknown"}:
+            raise HTTPException(422, "无效沟通状态")
+        statement = statement.where(m.communications.c.status == status)
+    scope = f"communications:{profile_id}:{status}"
+    rows, next_cursor = page_query(session, m.communications, statement, cursor, limit, scope)
+    return {
+        "items": [communication_read(session, row) for row in rows],
+        "next_cursor": next_cursor,
+    }
 
 
 def _current_analysis(session, snapshot_id, profile_version_id, policy_version_id, model):

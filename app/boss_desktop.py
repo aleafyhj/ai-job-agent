@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app import models as m
 from app.api.resources import get_row, policy_read, profile_read
 from app.collected_jobs import persist_analysis
+from app.communications import finish_communication, start_communication
 from app.core.config import Settings
 from app.database import make_engine
 from app.desktop import Desktop, pixel
@@ -114,7 +115,17 @@ def scan_list(desktop, vision, root, args):
     return stats
 
 
-def run(desktop, vision, profile, policy, root, args, before_communicate=None, on_analysis=None):
+def run(
+    desktop,
+    vision,
+    profile,
+    policy,
+    root,
+    args,
+    before_communicate=None,
+    on_analysis=None,
+    on_communication=None,
+):
     if profile.get("facts", {}).get("data_kind") == "simulation" and getattr(
         args, "communicate", False
     ):
@@ -133,7 +144,16 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None, o
     }
     try:
         result = _run(
-            desktop, vision, profile, policy, root, args, before_communicate, on_analysis, stats
+            desktop,
+            vision,
+            profile,
+            policy,
+            root,
+            args,
+            before_communicate,
+            on_analysis,
+            on_communication,
+            stats,
         )
         stats["status"] = "completed"
         return result
@@ -146,7 +166,18 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None, o
         print("停止原因:", stats.get("stop_reason", stats.get("error_type")))
 
 
-def _run(desktop, vision, profile, policy, root, args, before_communicate, on_analysis, stats):
+def _run(
+    desktop,
+    vision,
+    profile,
+    policy,
+    root,
+    args,
+    before_communicate,
+    on_analysis,
+    on_communication,
+    stats,
+):
     """Bounded loop. One fresh card click at a time; no stale per-page coordinate batch."""
     simulation = profile.get("facts", {}).get("data_kind") == "simulation"
     if simulation and getattr(args, "communicate", False):
@@ -301,8 +332,8 @@ def _run(desktop, vision, profile, policy, root, args, before_communicate, on_an
                     on_analysis(history_key.split(":", 1)[1], card, detail, record, screenshot_path)
                 )
             if args.communicate and decision["eligible"]:
-                if before_communicate is None:
-                    raise RuntimeError("缺少投递前版本校验，禁止沟通")
+                if before_communicate is None or on_communication is None:
+                    raise RuntimeError("缺少沟通前数据库守卫，禁止沟通")
                 before_communicate()
                 day = datetime.now(ZoneInfo(policy["timezone"])).date().isoformat()
                 used = sum(
@@ -314,11 +345,6 @@ def _run(desktop, vision, profile, policy, root, args, before_communicate, on_an
                 )
                 if used >= policy["daily_limit"]:
                     raise RuntimeError("本次沟通次数达到策略限额，停止")
-                # Persist before irreversible input; never retry uncertain communication.
-                record["state"] = "communication_pending"
-                record["communication_day"] = day
-                state[history_key] = record
-                save_state(state_path, state)
                 fresh_image, fresh_size = desktop.capture()
                 fresh = vision.inspect(fresh_image, evidence, "confirm_communication_target")
                 if (
@@ -328,21 +354,85 @@ def _run(desktop, vision, profile, policy, root, args, before_communicate, on_an
                     or identity(fresh.selected) != key
                     or fresh.communicate is None
                 ):
-                    raise RuntimeError("沟通前无法确认职位和按钮，保留 pending，不自动重试")
-                desktop.click(*pixel(fresh.communicate.center, fresh_size), expected=fresh_image)
+                    raise RuntimeError("沟通前无法确认职位和按钮，未点击")
+                target = pixel(fresh.communicate.center, fresh_size)
+                communication = on_communication("pending", record, fresh_image, target, None, None)
+                record["communication_id"] = str(communication["id"])
+                # Persist before irreversible input; pending/unknown is never retried.
+                record["state"] = "communication_pending"
+                record["communication_day"] = day
+                state[history_key] = record
+                save_state(state_path, state)
+                try:
+                    desktop.click(*target, expected=fresh_image)
+                except BaseException as exc:
+                    on_communication(
+                        "unknown",
+                        record,
+                        fresh_image,
+                        target,
+                        {
+                            "input": "unknown",
+                            "confirmation": False,
+                            "error_type": type(exc).__name__,
+                        },
+                        communication["id"],
+                    )
+                    record["state"] = "communication_unknown"
+                    state[history_key] = record
+                    save_state(state_path, state)
+                    raise RuntimeError("沟通点击结果未知，已记录且不会自动重试") from None
                 communications += 1
-                time.sleep(args.settle)
-                result_image, _ = desktop.capture()
-                result = vision.inspect(result_image, evidence, "communication_result")
-                record["state"] = (
-                    "communication_confirmed"
+                try:
+                    time.sleep(args.settle)
+                    result_image, _ = desktop.capture()
+                    result = vision.inspect(result_image, evidence, "communication_result")
+                except BaseException as exc:
+                    try:
+                        unknown_image, _ = desktop.capture()
+                    except BaseException:
+                        unknown_image = fresh_image
+                    on_communication(
+                        "unknown",
+                        record,
+                        unknown_image,
+                        target,
+                        {
+                            "input": "executed",
+                            "confirmation": False,
+                            "error_type": type(exc).__name__,
+                        },
+                        communication["id"],
+                    )
+                    record["state"] = "communication_unknown"
+                    state[history_key] = record
+                    save_state(state_path, state)
+                    raise RuntimeError("沟通后无法确认结果，已记录且不会自动重试") from None
+                result_status = (
+                    "confirmed"
                     if result.communication_confirmed
                     and not result.blocked
                     and not result.uncertain
-                    else "communication_unknown"
+                    else "unknown"
                 )
+                on_communication(
+                    result_status,
+                    record,
+                    result_image,
+                    target,
+                    {
+                        "input": "executed",
+                        "confirmation": result_status == "confirmed",
+                        "blocked": result.blocked,
+                        "uncertain": result.uncertain,
+                    },
+                    communication["id"],
+                )
+                record["state"] = "communication_" + result_status
                 state[history_key] = record
                 save_state(state_path, state)
+                stats["records"].append(record)
+                stats["communications"] = communications
                 # Chat navigation may replace the job list. Do not click through it blindly.
                 if record["state"] != "communication_confirmed" or not result.cards:
                     raise RuntimeError("沟通结果已记录；请核查并回到职位列表后再启动")
@@ -536,9 +626,28 @@ def main():
                     engine, settings, profile, policy, key, card, detail, record, image_path
                 )
 
+            def store_communication(stage, record, image, coordinate, result, communication_id):
+                if stage == "pending":
+                    return start_communication(
+                        engine, settings, record["analysis_id"], image, coordinate
+                    )
+                return finish_communication(
+                    engine, settings, communication_id, stage, image, result or {}
+                )
+
             print(
                 "本次分析数量:",
-                run(desktop, vision, profile, policy, root, args, check_versions, store_analysis),
+                run(
+                    desktop,
+                    vision,
+                    profile,
+                    policy,
+                    root,
+                    args,
+                    check_versions,
+                    store_analysis,
+                    store_communication,
+                ),
             )
     except KeyboardInterrupt:
         print("用户已停止")
