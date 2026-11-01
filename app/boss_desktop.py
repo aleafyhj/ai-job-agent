@@ -84,7 +84,6 @@ def scan_list(desktop, vision, root, args):
                 stats["cards"][key] = card.model_dump()
             reason = progress.observe(
                 [identity(card) for card in cards],
-                end=screen.list_end_visible,
                 loading=screen.list_loading,
             )
             if reason:
@@ -222,7 +221,6 @@ def _run(desktop, vision, profile, policy, root, args, before_communicate, on_an
             if card is None:
                 reason = progress.observe(
                     [identity(item) for item in screen.cards if has_card_identity(item)],
-                    end=screen.list_end_visible,
                     loading=screen.list_loading,
                 )
                 if reason:

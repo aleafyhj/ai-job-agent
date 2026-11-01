@@ -96,8 +96,7 @@ class Vision:
             "而不是只看最后截图。其他阶段只转录可见正文，requirements一律为空数组，"
             "hard_conditions一律unknown，不进行逐屏技能匹配。"
             "阶段list只识别卡片、当前职位和滚动点，detail_text返回空字符串，避免重复转录。"
-            "list_end_visible仅当左侧职位列表明确显示没有更多职位/已经到底/暂无更多时true，"
-            "右侧详情结束、地图、浏览器页底和没有新卡片不能证明列表结束。"
+            "职位列表是持续刷新的推荐流，不需要判断页面或列表到底。"
             "list_loading仅当列表有明确加载中指示时true。"
             f"本次阶段={phase}。schema={schema}"
         )

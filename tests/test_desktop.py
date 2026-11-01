@@ -365,7 +365,7 @@ def test_pointer_mismatch_records_values_without_click(tmp_path):
 
 
 @pytest.mark.parametrize("stale_first", [False, True])
-def test_continuous_list_dedup_and_confirmed_end(tmp_path, monkeypatch, stale_first):
+def test_continuous_list_dedup_and_stagnation_stop(tmp_path, monkeypatch, stale_first):
     monkeypatch.setattr("app.boss_desktop.time.sleep", lambda _: None)
     viewport = [0]
     clicks = []
@@ -422,8 +422,8 @@ def test_continuous_list_dedup_and_confirmed_end(tmp_path, monkeypatch, stale_fi
     assert run(desktop, vision, profile, policy, tmp_path, args) == 2
     assert clicks == [0, 1]
     report = json.loads(next((tmp_path / "runs").rglob("summary.json")).read_text(encoding="utf-8"))
-    assert report["stop_reason"] == "list_end_confirmed"
-    assert report["list_scrolls"] == 3
+    assert report["stop_reason"] == "no_new_cards"
+    assert report["list_scrolls"] == 4
     viewport[0] = 0
     assert run(desktop, vision, profile, policy, tmp_path, args) == 0
     assert clicks == [0, 1]
@@ -450,7 +450,7 @@ def test_loading_list_waits_without_input(tmp_path, monkeypatch):
     assert report["list_scrolls"] == 0
 
 
-def test_scan_list_never_clicks_and_confirms_end(tmp_path, monkeypatch):
+def test_scan_list_ignores_legacy_end_marker_and_stops_on_stagnation(tmp_path, monkeypatch):
     from app.boss_desktop import scan_list
 
     monkeypatch.setattr("app.boss_desktop.time.sleep", lambda _: None)
@@ -466,8 +466,8 @@ def test_scan_list_never_clicks_and_confirms_end(tmp_path, monkeypatch):
         tmp_path,
         SimpleNamespace(pages=5, left_scroll=[200, 500], ticks=3, settle=1),
     )
-    assert result["stop_reason"] == "list_end_confirmed"
+    assert result["stop_reason"] == "no_new_cards"
     assert len(result["cards"]) == 1
-    assert result["duplicate_skips"] == 1
+    assert result["duplicate_skips"] == 3
     assert result["clicks"] == 0
-    assert len(scrolls) == 1
+    assert len(scrolls) == 3
