@@ -82,7 +82,11 @@ def collect_detail(desktop, vision, card, evidence, root, args, *, evaluate=Fals
         combined = report["detail_text"]
         if not combined.strip():
             raise RuntimeError("职位正文为空，停止采集")
-        if complete and evaluate:
+        if complete and evaluate and hasattr(vision, "evaluate_text"):
+            detail._evaluation = vision.evaluate_text(combined, evidence)
+            detail.requirements = detail._evaluation.requirements
+            detail.hard_conditions = "unknown"
+        elif complete and evaluate:
             detail, _, observation = observe(
                 vision,
                 image,

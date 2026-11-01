@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app import models as m
 from app.api.dependencies import DB, require_token
 from app.api.resources import Cursor, Limit, get_row, page_query
+from app.vision import ANALYSIS_VERSION
 
 router = APIRouter(dependencies=[Depends(require_token)], tags=["jobs"])
 
@@ -57,7 +58,8 @@ def read_analysis(analysis_id: UUID, session: DB):
     policy_version = get_row(session, m.policy_versions, row["policy_version_id"])
     policy = get_row(session, m.policies, policy_version["policy_id"])
     result["is_current"] = (
-        profile["current_version_id"] == version["id"]
+        row["prompt_version"] == ANALYSIS_VERSION
+        and profile["current_version_id"] == version["id"]
         and policy["current_version_id"] == policy_version["id"]
         and job["latest_snapshot_id"] == snapshot["id"]
     )

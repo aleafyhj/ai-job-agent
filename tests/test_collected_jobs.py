@@ -99,7 +99,40 @@ def test_visual_collection_dedup_queries_and_stale_analysis(database, tmp_path):
         response = client.get("/api/v1/analyses/" + first["analysis_id"]).json()
         assert response["eligible"] is True
         assert response["match_evidence"]["decision"] == record["decision"]
-        assert response["prompt_version"] == "desktop-v3"
+        assert response["prompt_version"] == "desktop-v4"
+        review_record = {
+            **record,
+            "decision": {
+                "score": 75,
+                "eligible": False,
+                "needs_review": True,
+                "reasons": ["category_conflict"],
+            },
+        }
+        review = persist_analysis(
+            engine,
+            settings,
+            profile,
+            policy,
+            "needs-review-job",
+            card,
+            detail,
+            review_record,
+            image,
+        )
+        review_response = client.get("/api/v1/analyses/" + review["analysis_id"]).json()
+        assert review_response["status"] == "needs_review"
+        assert review_response["eligible"] is False
+        assert "category_conflict" in review_response["uncertainties"]
+        with Session(engine) as session, session.begin():
+            session.execute(
+                m.analyses.update()
+                .where(m.analyses.c.id == UUID(first["analysis_id"]))
+                .values(prompt_version="desktop-v3")
+            )
+        old = client.get("/api/v1/analyses/" + first["analysis_id"]).json()
+        assert old["is_current"] is False
+        assert old["eligible"] is False
         with Session(engine) as session, session.begin():
             version = session.scalar(
                 m.profile_versions.insert()

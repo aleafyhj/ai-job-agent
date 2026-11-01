@@ -117,7 +117,17 @@ def persist_analysis(engine, settings, profile, policy, key, card, detail, recor
             str(profile_current) != profile["version_id"]
             or str(policy_current) != policy["version_id"]
         )
-        needs_review = not complete or detail.hard_conditions == "unknown" or stale
+        needs_review = (
+            not complete
+            or detail.hard_conditions == "unknown"
+            or stale
+            or record.get("decision", {}).get("needs_review", False)
+        )
+        uncertainties = []
+        if not complete or detail.hard_conditions == "unknown" or stale:
+            uncertainties.append("incomplete_or_unknown_or_stale")
+        if record.get("decision", {}).get("needs_review"):
+            uncertainties.extend(record["decision"].get("reasons", []))
         values = dict(
             job_snapshot_id=snapshot_id,
             profile_version_id=UUID(profile["version_id"]),
@@ -129,6 +139,7 @@ def persist_analysis(engine, settings, profile, policy, key, card, detail, recor
                 passes
                 and not needs_review
                 and detail.hard_conditions == "pass"
+                and record.get("decision", {}).get("eligible", True)
                 and profile.get("facts", {}).get("data_kind") != "simulation"
             ),
             requirements=record["requirements"],
@@ -137,11 +148,13 @@ def persist_analysis(engine, settings, profile, policy, key, card, detail, recor
                 "decision": record.get("decision"),
                 "profile_data_kind": profile.get("facts", {}).get("data_kind", "unspecified"),
             },
-            uncertainties=["incomplete_or_unknown_or_stale"] if needs_review else [],
+            uncertainties=list(dict.fromkeys(uncertainties)),
             prompt_version=ANALYSIS_VERSION,
             model=settings.vision_model,
             input_hash=hashlib.sha256(
-                (content_hash + profile["version_id"] + policy["version_id"]).encode()
+                (
+                    content_hash + profile["version_id"] + policy["version_id"] + ANALYSIS_VERSION
+                ).encode()
             ).hexdigest(),
         )
         analysis_id = session.scalar(

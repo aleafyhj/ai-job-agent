@@ -179,3 +179,54 @@ def test_seventy_boundary_and_explanation(comparison, eligible):
 def test_boolean_is_not_a_skill_reference():
     with pytest.raises(ValidationError):
         Requirement(quote="Python", importance="required", skill_index=False)
+
+
+def test_production_full_text_evaluator_is_used_without_last_image_regrading(tmp_path, monkeypatch):
+    from app.matching import Criterion, Evaluation, assess
+
+    monkeypatch.setattr("app.desktop_collection.time.sleep", lambda _: None)
+    stream = BytesIO()
+    Image.new("RGB", (100, 100), "white").save(stream, format="PNG")
+    data = detail("职位描述：熟悉Python", start=True, complete=True)
+    evaluation = Evaluation(
+        uncertain=False,
+        requirements=[
+            Criterion(
+                quote="熟悉Python",
+                category="technical",
+                importance="required",
+                status="matched",
+                skill_indices=[0],
+            )
+        ],
+    )
+    phases = []
+
+    def inspect(image, evidence, phase):
+        phases.append(phase)
+        return data
+
+    def evaluate_text(text, evidence):
+        assert text == "职位描述：熟悉Python"
+        return evaluation
+
+    result, _, folder = collect_detail(
+        SimpleNamespace(capture=lambda: (stream.getvalue(), (100, 100))),
+        SimpleNamespace(inspect=inspect, evaluate_text=evaluate_text),
+        data.selected,
+        {},
+        tmp_path,
+        SimpleNamespace(detail_scrolls=1, right_scroll=None, settle=1, ticks=3),
+        evaluate=True,
+    )
+    assert phases == ["detail"]
+    assert result._evaluation == evaluation
+    assert result.requirements == evaluation.requirements
+    decision = assess(
+        result._evaluation,
+        result.detail_text,
+        {"skills": [{"canonical_name": "Python", "evidence": "Python项目"}]},
+        {"threshold": 70, "comparison": "gte"},
+    )
+    assert decision["score"] == 100
+    assert (folder / "collection.json").is_file()

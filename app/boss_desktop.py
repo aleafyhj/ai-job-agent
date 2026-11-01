@@ -21,8 +21,9 @@ from app.desktop import Desktop, pixel
 from app.desktop_collection import collect_detail
 from app.desktop_report import ground_card, normalized, observe, verify_selection
 from app.list_progress import ListProgress
+from app.matching import assess
 from app.mouse_bridge import BridgeMouse
-from app.vision import Card, Vision, match_report
+from app.vision import ANALYSIS_VERSION, Card, Vision, match_report
 
 
 def identity(card):
@@ -210,6 +211,7 @@ def _run(desktop, vision, profile, policy, root, args, before_communicate, on_an
                         and previous.get("state") == "analyzed"
                         and previous.get("profile_version") == profile["version_id"]
                         and previous.get("policy_version") == policy["version_id"]
+                        and previous.get("analysis_version") == ANALYSIS_VERSION
                     )
                 )
                 seen.add(key)
@@ -262,7 +264,13 @@ def _run(desktop, vision, profile, policy, root, args, before_communicate, on_an
             combined = detail.detail_text
             complete = detail.detail_complete
             hard = detail.hard_conditions
-            decision = match_report(detail, skills, policy)
+            decision = (
+                assess(detail._evaluation, combined, profile, policy)
+                if detail._evaluation is not None
+                else match_report(detail, skills, policy)
+            )
+            hard = decision.get("hard_conditions", hard)
+            detail.hard_conditions = hard
             if simulation:
                 decision["eligible"] = False
                 decision["reasons"].append("simulation_profile")
@@ -273,10 +281,13 @@ def _run(desktop, vision, profile, policy, root, args, before_communicate, on_an
                 "score": value,
                 "decision": decision,
                 "simulation": simulation,
+                "analysis_version": ANALYSIS_VERSION,
                 "hard_conditions": hard,
                 "profile_version": profile["version_id"],
                 "policy_version": policy["version_id"],
-                "state": "analyzed" if value is not None and hard != "unknown" else "needs_review",
+                "state": "analyzed"
+                if value is not None and hard != "unknown" and not decision.get("needs_review")
+                else "needs_review",
                 "requirements": [item.model_dump() for item in detail.requirements],
                 "detail_text": combined,
                 "detail_complete": complete,
