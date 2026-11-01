@@ -7,7 +7,7 @@ from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
 
-from app.matching import Evaluation
+from app.matching import Evaluation, passes_threshold
 
 Coordinate = Annotated[int, Field(gt=0, lt=1000, strict=True)]
 ANALYSIS_VERSION = "desktop-v6"
@@ -244,9 +244,7 @@ def match_report(screen, skills, policy):
     comparison = policy["comparison"]
     if comparison not in {"gte", "gt"}:
         raise ValueError("未知匹配阈值比较方式")
-    passes = value is not None and (
-        value >= threshold if comparison == "gte" else value > threshold
-    )
+    passes = passes_threshold(value, threshold, comparison)
     reasons = []
     if value is None:
         reasons.append("incomplete_or_unreliable_requirements")

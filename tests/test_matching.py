@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from app.matching import Criterion, Evaluation, assess
+from app.matching import Criterion, Evaluation, assess, passes_threshold
 from app.vision import Vision
 
 PROFILE = {
@@ -141,6 +141,31 @@ def test_exact_seventy_with_known_unmatched_skills(comparison, eligible):
     )
     assert result["score"] == 70
     assert result["eligible"] is eligible
+
+
+@pytest.mark.parametrize(
+    "score,threshold,comparison,expected",
+    [
+        ("69.99", "70", "gte", False),
+        ("70", "70", "gte", True),
+        ("70", "70", "gt", False),
+        ("70.01", "70", "gt", True),
+        (None, "70", "gte", False),
+        ("invalid", "70", "gte", False),
+        ("101", "70", "gte", False),
+        ("70", "70", "invalid", False),
+    ],
+)
+def test_exact_threshold_comparison(score, threshold, comparison, expected):
+    assert passes_threshold(score, threshold, comparison) is expected
+
+
+def test_simulation_profile_keeps_score_but_can_never_be_eligible():
+    profile = {**PROFILE, "facts": {"data_kind": "simulation"}}
+    result = evaluate(requirement("熟悉Python", skill_indices=[0]), profile=profile)
+    assert result["score"] == 100
+    assert not result["eligible"]
+    assert "simulation_profile" in result["reasons"]
 
 
 def test_full_text_evaluation_uses_text_only_request(monkeypatch):

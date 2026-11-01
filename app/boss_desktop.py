@@ -273,7 +273,8 @@ def _run(desktop, vision, profile, policy, root, args, before_communicate, on_an
             detail.hard_conditions = hard
             if simulation:
                 decision["eligible"] = False
-                decision["reasons"].append("simulation_profile")
+                if "simulation_profile" not in decision["reasons"]:
+                    decision["reasons"].append("simulation_profile")
             value = decision["score"]
             processed += 1
             record = {

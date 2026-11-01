@@ -2,6 +2,7 @@
 
 import re
 import unicodedata
+from decimal import Decimal, InvalidOperation
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -51,6 +52,22 @@ DIRECT_SKILL_PATTERNS = {
     "PostgreSQL": r"(?<![a-z0-9])postgresql(?![a-z0-9])",
     "FastAPI": r"(?<![a-z0-9])fastapi(?![a-z0-9])",
 }
+
+
+def passes_threshold(score, threshold, comparison: str) -> bool:
+    """Compare percentage values exactly instead of through binary floats."""
+    if comparison not in {"gte", "gt"} or score is None:
+        return False
+    try:
+        score_value = Decimal(str(score))
+        threshold_value = Decimal(str(threshold))
+    except (InvalidOperation, ValueError):
+        return False
+    if not (Decimal("0") <= score_value <= Decimal("100")):
+        return False
+    if not (Decimal("0") <= threshold_value <= Decimal("100")):
+        return False
+    return score_value >= threshold_value if comparison == "gte" else score_value > threshold_value
 
 
 def _canonical(value: str, *, positions: bool = False):
@@ -120,6 +137,8 @@ def assess(evaluation, text, profile, policy):
     seen = set()
     levels = {"basic": 0, "proficient": 1, "expert": 2}
     skills = profile["skills"]
+    if profile.get("facts", {}).get("data_kind") == "simulation":
+        issues.append("simulation_profile")
     multiple = (
         evaluation.multiple_roles
         or len(set(re.findall(r"岗位[一二三四五六七八九十]+[：:、]", text))) > 1
@@ -289,10 +308,8 @@ def assess(evaluation, text, profile, policy):
     comparison = policy["comparison"]
     if comparison not in {"gte", "gt"}:
         raise ValueError("未知匹配阈值比较方式")
-    threshold = float(policy["threshold"])
-    passes = score is not None and (
-        score >= threshold if comparison == "gte" else score > threshold
-    )
+    threshold = policy["threshold"]
+    passes = passes_threshold(score, threshold, comparison)
     reasons = list(dict.fromkeys(issues))
     if score is not None and not passes:
         reasons.append("below_threshold")
@@ -301,7 +318,7 @@ def assess(evaluation, text, profile, policy):
     return {
         "score": score,
         "score_upper_bound": upper,
-        "threshold": threshold,
+        "threshold": float(threshold),
         "comparison": comparison,
         "hard_conditions": hard_status,
         "needs_review": bool(issues),

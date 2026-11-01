@@ -28,6 +28,16 @@ soft/other 的 importance 固定为 preferred 占位，不表示它们是技术�
 
 达到阈值、必需硬条件通过且没有需要复核的问题才具备匹配资格。必需技术项未知、引用错误、分类冲突、复合项未拆、提取不确定等会设置 needs_review。模拟档案无论多少分都不能沟通；沟通仍须显式启用，评分不会自动执行鼠标输入。
 
+所有评分、分析落库和申请入队入口复用同一个 Decimal 阈值函数，避免二进制浮点和入口间语义不一致。默认 `gte` 表示大于等于：69.99 不通过、70 通过；`gt` 表示严格大于：70 不通过、70.01 通过。非法比较方式、空分数和0–100之外的值均不通过。
+
+## 固定基准校准
+
+```powershell
+python -m scripts.run_score_calibration
+```
+
+该命令纯离线运行，不读取数据库、不调用模型，也不操作招聘网站。它固定验证高匹配基准100分可通过、相同技能标记为 simulation 后100分仍不可沟通、硬条件失败/未知均阻断，以及70分上下边界。它用于防止确定性评分规则回归，不替代真实职位文本的模型提取质量评估。
+
 ## 保存与兼容
 
 分析接口 match_evidence.decision 包含 score、score_upper_bound、weights、hard_conditions、needs_review、reasons 及校验后的逐项 requirements。analyses.requirements 保留模型原始结构化结果，decision.requirements 保留校验后的类别/状态及原始技能证据，供对比追溯。

@@ -65,7 +65,8 @@ def main():
             decision = assess(evaluation, text, profile, policy)
             if report["simulation"]:
                 decision["eligible"] = False
-                decision["reasons"].append("simulation_profile")
+                if "simulation_profile" not in decision["reasons"]:
+                    decision["reasons"].append("simulation_profile")
             row = {
                 "card": record["card"],
                 "previous_score": record["score"],

@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app import models as m
+from app.matching import passes_threshold
 
 
 class ApplicationBlocked(ValueError):
@@ -97,11 +98,7 @@ def enqueue_application(
         session.execute(sa.select(m.resumes).where(m.resumes.c.id == resume_id)).mappings().one()
     )
     score = analysis["score"]
-    passes = score is not None and (
-        score >= policy["threshold"]
-        if policy["comparison"] == "gte"
-        else score > policy["threshold"]
-    )
+    passes = passes_threshold(score, policy["threshold"], policy["comparison"])
     if not (
         analysis["status"] == "ready"
         and analysis["eligible"]

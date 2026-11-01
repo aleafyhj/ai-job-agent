@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app import models as m
+from app.matching import passes_threshold
 from app.vision import ANALYSIS_VERSION
 
 
@@ -102,10 +103,8 @@ def persist_analysis(engine, settings, profile, policy, key, card, detail, recor
             )
         )
         complete = record["score"] is not None and detail.detail_complete
-        passes = complete and (
-            record["score"] >= float(policy["threshold"])
-            if policy["comparison"] == "gte"
-            else record["score"] > float(policy["threshold"])
+        passes = complete and passes_threshold(
+            record["score"], policy["threshold"], policy["comparison"]
         )
         profile_current = session.scalar(
             sa.select(m.profiles.c.current_version_id).where(m.profiles.c.id == UUID(profile["id"]))
