@@ -106,6 +106,37 @@ resumes = table(
     check("version > 0", "version"),
     check("size > 0", "size"),
 )
+resume_imports = table(
+    "resume_imports",
+    ref("profile_id", "profiles.id"),
+    ref("resume_id", "resumes.id"),
+    ref("source_profile_version_id", "profile_versions.id"),
+    ref("target_profile_version_id", "profile_versions.id"),
+    *state("ready needs_review", "needs_review"),
+    *state("fill_missing replace_resume_fields", "fill_missing", "mode"),
+    col("source_hash", sa.CHAR(64)),
+    col("parser_version"),
+    col("prompt_version"),
+    col("model"),
+    doc("extraction"),
+    doc("warnings", "[]"),
+    sa.UniqueConstraint("resume_id", "prompt_version", "model"),
+    sa.ForeignKeyConstraint(
+        ["profile_id", "resume_id"],
+        ["resumes.profile_id", "resumes.id"],
+        name="fk_resume_import_resume_owner",
+    ),
+    sa.ForeignKeyConstraint(
+        ["profile_id", "source_profile_version_id"],
+        ["profile_versions.profile_id", "profile_versions.id"],
+        name="fk_resume_import_source_owner",
+    ),
+    sa.ForeignKeyConstraint(
+        ["profile_id", "target_profile_version_id"],
+        ["profile_versions.profile_id", "profile_versions.id"],
+        name="fk_resume_import_target_owner",
+    ),
+)
 platform_accounts = table(
     "platform_accounts",
     col("platform_key", sa.String(64)),
@@ -405,4 +436,10 @@ sa.Index(
 sa.Index("ix_audit_application_time", audit_events.c.application_id, audit_events.c.occurred_at)
 
 # Applied by the initial migration; future schema changes require new migrations.
-IMMUTABLE_TABLES = ("profile_versions", "policy_versions", "resumes", "job_snapshots")
+IMMUTABLE_TABLES = (
+    "profile_versions",
+    "policy_versions",
+    "resumes",
+    "resume_imports",
+    "job_snapshots",
+)

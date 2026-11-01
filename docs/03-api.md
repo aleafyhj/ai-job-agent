@@ -4,7 +4,7 @@ desktop-v4 增量：分析的 match_evidence.decision 新增 score_upper_bound�
 
 正文采集增量：CLI `collect-detail` 支持无档案的当前职位逐屏采集，输出本地报告；`run` 的分析详情在 `match_evidence.decision` 返回确定性评分说明（score/threshold/comparison/eligible/reasons/requirements，逐项含 quote/importance/weight/matched/skill_index/skill_name）。旧分析可能没有该字段。此字段保留当时决策；是否仍有效以分析接口顶层 `is_current` 和 `eligible` 为准。
 
-第三阶段已实现：health/ready；profiles 的创建、列表、详情、更新；简历上传、列表、指定默认简历与鉴权下载；policies 的创建、列表、详情、更新。下面表格中的其他业务接口仍为后续设计，不代表已经可调用。当前以 `/docs` 中生成的 OpenAPI 为实际已实现接口清单。
+已实现：health/ready；profiles 的创建、列表、详情、更新；简历上传、结构化导入、列表、指定默认简历与鉴权下载；policies 的创建、列表、详情、更新。下面表格中的其他业务接口仍为后续设计，不代表已经可调用。当前以 `/docs` 中生成的 OpenAPI 为实际已实现接口清单。
 
 2026-10-30 增量：新增 GET /jobs（当前支持 cursor/limit/platform_key/status）、GET /jobs/{id}（含最新正文快照）、GET /analyses/{id}（含 is_current）。过期分析的 eligible 返回 false。GET /artifacts/{id}/content 同时支持鉴权下载职位截图。桌面 run 负责采集和落库；POST 分析、任务调度以及候选人分数筛选接口尚未开放。
 
@@ -33,6 +33,7 @@ desktop-v4 增量：分析的 match_evidence.decision 新增 score_upper_bound�
 | GET `/profiles/{id}` | 无 | Profile，含当前版本 |
 | PUT `/profiles/{id}` | ProfileWrite，If-Match | 200，新建不可变版本并切换当前版本 |
 | POST `/profiles/{id}/resumes` | multipart `file` | 201 Resume；PDF/DOCX，最大 10MB，验证内容类型 |
+| POST `/profiles/{id}/resumes/{resume_id}/import` | ResumeImportWrite，If-Match | 201 ResumeImport 和新 Profile 版本；相同简历/提示词/模型重复请求返回 200 |
 | GET `/profiles/{id}/resumes` | 分页 | Resume 列表，不直接暴露磁盘路径 |
 | PUT `/profiles/{id}/default-resume` | `resume_id` | 200，必须属于该档案 |
 | GET `/platforms` | 无 | 适配器能力、是否支持搜索/投递/结果核查 |
@@ -83,7 +84,9 @@ Run mode：`collect_only` / `analyze_only` / `auto_apply`。analyze_only 包含�
 
 Resume：`id,profile_id,version,filename,mime_type,size,sha256,created_at`。
 
-当前 Resume 还返回 artifact_id，用于 `/artifacts/{id}/content` 下载。上传接受 application/pdf 或 application/vnd.openxmlformats-officedocument.wordprocessingml.document，扩展名须对应；最大 10 MiB。拒绝损坏/加密 PDF、空文件、超过 100 页的 PDF、无效 DOCX 包和宏内容；不提取简历文本、不执行文档中的内容。整个写请求限制 12 MiB；文件不合格返回 422，超限返回 413。指定其他档案的默认简历返回 409。上传和选择默认简历不修改能力档案版本号。
+当前 Resume 还返回 artifact_id，用于 `/artifacts/{id}/content` 下载。上传接受 application/pdf 或 application/vnd.openxmlformats-officedocument.wordprocessingml.document，扩展名须对应；最大 10 MiB。拒绝损坏/加密 PDF、空文件、超过 100 页的 PDF、无效 DOCX 包和宏内容；上传本身不执行文档中的内容。整个写请求限制 12 MiB；文件不合格返回 422，超限返回 413。指定其他档案的默认简历返回 409。
+
+ResumeImportWrite：`mode` 为 `fill_missing`（默认，人工数据优先）或 `replace_resume_fields`，`set_default_resume` 默认 true。导入要求 If-Match 与当前档案版本一致；外部模型调用不占用数据库事务，落库前再次锁定并校验版本。PDF/DOCX 文本在本地提取，常见联系方式脱敏后发送千问；技能、教育和年限必须包含可在输入中核验的连续原文证据。解析结果、模型/提示词/解析器版本和源文件散列写入不可变 resume_imports，不保存提取出的整份明文。每次成功导入创建新的 profile_versions；扫描 PDF 暂不支持 OCR。不确定结果允许 `fill_missing` 并标为 needs_review，但禁止 replace。
 
 Task：`id,type,status,run_id,progress:{stage,completed,total},attempt_count,error:{code,message,retryable},created_at,started_at,finished_at`。未知 total 为 null，不伪造进度百分比。
 

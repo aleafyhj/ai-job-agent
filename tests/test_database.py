@@ -147,7 +147,7 @@ def test_migration_roundtrip_and_metadata(database):
     engine, config = database
     with engine.begin() as connection:
         assert compare_metadata(MigrationContext.configure(connection), m.metadata) == []
-        assert len(sa.inspect(connection).get_table_names()) == 23  # 22 + alembic_version
+        assert len(sa.inspect(connection).get_table_names()) == 24  # 23 + alembic_version
         config.attributes["connection"] = connection
         command.downgrade(config, "base")
         assert sa.inspect(connection).get_table_names() == ["alembic_version"]
@@ -172,7 +172,8 @@ def test_version_ownership_and_uniqueness(database):
 
 
 @pytest.mark.parametrize(
-    "table_name", ["profile_versions", "policy_versions", "resumes", "job_snapshots"]
+    "table_name",
+    ["profile_versions", "policy_versions", "resumes", "job_snapshots"],
 )
 def test_versions_are_immutable(database, table_name):
     engine, _ = database

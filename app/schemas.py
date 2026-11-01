@@ -91,6 +91,28 @@ class DefaultResumeWrite(InputModel):
     resume_id: UUID
 
 
+class ResumeImportWrite(InputModel):
+    mode: Literal["fill_missing", "replace_resume_fields"] = "fill_missing"
+    set_default_resume: bool = True
+
+
+class ResumeImportRead(BaseModel):
+    id: UUID
+    profile_id: UUID
+    resume_id: UUID
+    source_profile_version_id: UUID
+    target_profile_version_id: UUID
+    status: Literal["ready", "needs_review"]
+    mode: Literal["fill_missing", "replace_resume_fields"]
+    extraction: dict
+    warnings: list[str]
+    parser_version: str
+    prompt_version: str
+    model: str
+    created_at: datetime
+    profile: ProfileRead
+
+
 T = TypeVar("T")
 
 

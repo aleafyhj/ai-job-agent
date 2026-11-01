@@ -35,7 +35,7 @@ def ready(request: Request):
     try:
         with engine.connect() as connection:
             revision = connection.scalar(sa.text("SELECT version_num FROM alembic_version"))
-        if revision != "0001":
+        if revision != "0002":
             return JSONResponse(
                 status_code=503,
                 content={

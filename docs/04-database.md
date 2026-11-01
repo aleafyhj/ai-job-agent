@@ -1,6 +1,6 @@
 # 数据库设计（PostgreSQL 逻辑模型）
 
-第二步已依据本设计实现 PostgreSQL 模型和初始迁移，详见 `app/models.py` 与 `migrations/versions/0001_initial.py`。除资源租约使用 resource_key 为主键外，主键为 UUID；时间为 timestamptz。各表包含 created_at/updated_at（executor_leases 除外），不可变版本的更新时间固定为创建时间。分数 numeric(9,6)，散列使用 SHA-256。业务对象使用状态归档，含审计引用的记录不直接级联删除。
+第二步已依据本设计实现 PostgreSQL 模型和初始迁移，后续简历导入使用增量迁移 0002，详见 `app/models.py` 与 `migrations/versions/`。除资源租约使用 resource_key 为主键外，主键为 UUID；时间为 timestamptz。各表包含 created_at/updated_at（executor_leases 除外），不可变版本的更新时间固定为创建时间。分数 numeric(9,6)，散列使用 SHA-256。业务对象使用状态归档，含审计引用的记录不直接级联删除。
 
 模型使用 SQLAlchemy Core，Session 执行事务，不引入 ORM 对象关系映射。版本/快照/简历禁止 UPDATE 与 DELETE；审计记录只允许追加。循环指针采用复合外键，申请的档案/分析/职位/平台归属由触发器校验。原始 SQL 若需生成 UUID 须显式传入；SQLAlchemy 插入时由 Python 默认生成。updated_at 由 SQLAlchemy 更新语句自动维护，原始 SQL 调用者需显式维护。
 
@@ -13,6 +13,7 @@ enqueue_application 原子完成去重、当前版本校验、策略/会话状�
 | profiles | name varchar(100), current_version_id UUID?, default_resume_id UUID? | 单个求职者根对象；当前版本/简历必须属于自身 |
 | profile_versions | profile_id, version int, skills JSONB, experience_years numeric, education JSONB, preferences JSONB, facts JSONB | FK profiles；UNIQUE(profile_id,version)，不可变 |
 | resumes | profile_id, version int, artifact_id, sha256 char(64), original_filename, mime_type, size bigint | FK profiles/artifacts；UNIQUE(profile_id,version)，版本不可变 |
+| resume_imports | profile_id, resume_id, source/target_profile_version_id, status, mode, source_hash, parser/prompt/model, extraction, warnings | 归属复合外键；UNIQUE(resume_id,prompt_version,model)，不可变；不保存整份明文 |
 | platform_accounts | platform_key, label, session_secret_ref, session_status, verified_at, enabled bool | 会话只存加密存储引用；状态 unknown/valid/expired/needs_input |
 | policies | name, current_version_id | 版本归属校验 |
 | policy_versions | policy_id, version, threshold numeric, comparison, daily_limit int, timezone, auto_apply bool, blocked_companies JSONB, allowed_platforms JSONB, scoring_rule_version, equivalence_map JSONB | UNIQUE(policy_id,version)；threshold 0–100，daily_limit>0；不可变 |
@@ -43,6 +44,8 @@ JSONB 用于平台差异和证据；身份、状态、外键和主要筛选字�
 erDiagram
     profiles ||--o{ profile_versions : versions
     profiles ||--o{ resumes : resumes
+    resumes ||--o{ resume_imports : imports
+    profile_versions ||--o{ resume_imports : generated_from
     policies ||--o{ policy_versions : versions
     search_plans ||--o{ search_runs : runs
     search_runs ||--o{ run_jobs : discovers

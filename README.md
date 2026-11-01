@@ -119,8 +119,9 @@ uv run --locked pytest -q
 
 1. `POST /api/v1/profiles` 创建候选人档案。只填写真实技能与证据，缺失信息保持空值。
 2. `POST /api/v1/profiles/{profile_id}/resumes` 选择 PDF/DOCX 上传。响应中返回 resume id 与 artifact id。
-3. `PUT /api/v1/profiles/{profile_id}/default-resume` 用 resume id 指定默认简历。上传不会自动更换默认简历。
-4. `POST /api/v1/policies` 创建策略。默认 BOSS直聘（平台标识 `boss`）、匹配度 ≥70、每日 20 份、自动投递关闭；本阶段没有投递执行器，开启该字段也不会触发真实投递。
+3. `POST /api/v1/profiles/{profile_id}/resumes/{resume_id}/import` 携带当前档案的 `If-Match`，从简历生成新的技能档案版本。默认请求 `{"mode":"fill_missing","set_default_resume":true}`，保留人工填写内容，只补充缺失技能、经历与教育信息。
+4. `PUT /api/v1/profiles/{profile_id}/default-resume` 可单独指定默认简历；执行上一步且 `set_default_resume=true` 时无需重复调用。
+5. `POST /api/v1/policies` 创建策略。默认 BOSS直聘（平台标识 `boss`）、匹配度 ≥70、每日 20 份、自动投递关闭；本阶段没有投递执行器，开启该字段也不会触发真实投递。
 
 档案请求示例（示意内容需替换为真实情况）：
 
@@ -146,6 +147,8 @@ uv run --locked pytest -q
 `GET /profiles`、`GET /policies`、`GET /profiles/{id}/resumes` 提供 cursor 分页。GET 档案/策略会返回 `ETag`；更新用完整请求体并携带 `If-Match`（如 `"1"`），冲突返回 409。每次修改追加不可变版本，已有分析使用的旧版本保持不变。分数与年限等 Decimal 字段以十进制字符串返回。
 
 简历最多 10 MiB，检查扩展名、MIME 和内部结构；PDF 需非加密且为 1–100 页，DOCX 检查包结构并限制解压总大小。整个写请求不能超过 12 MiB。文件按随机名称保存到 `artifacts/resumes/`，不直接使用上传路径；原文件名只作为展示名称。数据库写入失败时回滚记录并清理文件；进程突然退出仍可能遗留未被引用的文件，后续清理流程需按数据库引用核对。
+
+导入阶段在本地提取可复制文本，常见邮箱、手机号和身份证号先脱敏，再调用已配置的千问模型。AI 返回的技能、年限与教育信息必须携带简历原文证据；证据不存在则整次导入失败。`fill_missing` 不覆盖已人工录入的数据；`replace_resume_fields` 会替换简历相关字段，且解析存在不确定项时被拒绝。每次成功导入都会生成不可变档案版本和 `resume_imports` 审计记录。扫描版 PDF 暂不含 OCR，会返回 422。
 
 `GET /api/v1/artifacts/{artifact_id}/content` 可鉴权下载简历；不提供直接公开文件路径。文件存储目录可通过 `JOB_AGENT_ARTIFACTS_DIR` 设置，备份数据库时一并备份该目录。
 

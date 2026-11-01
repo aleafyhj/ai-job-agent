@@ -12,6 +12,12 @@ from fastapi.responses import FileResponse
 
 from app import models as m
 from app.api.dependencies import DB, require_token
+from app.resume_import import (
+    PARSER_VERSION,
+    PROMPT_VERSION,
+    import_resume_profile,
+    merge_profile,
+)
 from app.schemas import (
     DefaultResumeWrite,
     Page,
@@ -19,6 +25,8 @@ from app.schemas import (
     PolicyWrite,
     ProfileRead,
     ProfileWrite,
+    ResumeImportRead,
+    ResumeImportWrite,
     ResumeRead,
 )
 from app.storage import resolve_artifact, save_resume
@@ -195,6 +203,11 @@ def resume_read(row):
     )
 
 
+def resume_import_read(row, profile):
+    fields = {key: row[key] for key in ResumeImportRead.model_fields if key != "profile"}
+    return ResumeImportRead(**fields, profile=profile)
+
+
 @router.post(
     "/profiles/{profile_id}/resumes", response_model=ResumeRead, status_code=201, tags=["resumes"]
 )
@@ -280,6 +293,112 @@ def set_default_resume(profile_id: UUID, body: DefaultResumeWrite, session: DB):
             )
         )
         return profile_read(session, get_row(session, m.profiles, profile_id))
+
+
+@router.post(
+    "/profiles/{profile_id}/resumes/{resume_id}/import",
+    response_model=ResumeImportRead,
+    status_code=201,
+    tags=["resumes"],
+)
+def import_resume(
+    profile_id: UUID,
+    resume_id: UUID,
+    body: ResumeImportWrite,
+    version: Version,
+    session: DB,
+    request: Request,
+    response: Response,
+):
+    """Extract an uploaded resume and create a new immutable candidate profile version."""
+    settings = request.app.state.settings
+    if settings.vision_api_key is None:
+        raise HTTPException(503, "请先配置千问 API Key")
+
+    with session.begin():
+        root = get_row(session, m.profiles, profile_id)
+        current = profile_read(session, root)
+        check_version(current.version, version)
+        resume = get_row(session, m.resumes, resume_id)
+        if resume["profile_id"] != profile_id:
+            raise HTTPException(409, "简历不属于该档案")
+        existing = (
+            session.execute(
+                sa.select(m.resume_imports).where(
+                    m.resume_imports.c.resume_id == resume_id,
+                    m.resume_imports.c.prompt_version == PROMPT_VERSION,
+                    m.resume_imports.c.model == settings.vision_model,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        artifact = get_row(session, m.artifacts, resume["artifact_id"])
+    if existing is not None:
+        result = resume_import_read(existing, current)
+        etag(response, current.version)
+        response.status_code = 200
+        return result
+
+    path = resolve_artifact(settings.artifacts_dir, artifact["storage_key"])
+    if not path.is_file():
+        raise HTTPException(404, "简历文件不存在")
+    try:
+        extraction = import_resume_profile(path, resume["mime_type"], settings)
+        merged = merge_profile(current, extraction, body.mode)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    except RuntimeError:
+        raise HTTPException(502, "简历 AI 解析失败，请稍后重试") from None
+
+    if body.mode == "replace_resume_fields" and extraction.uncertain:
+        raise HTTPException(409, "解析结果存在不确定项，不能替换现有档案；请使用 fill_missing")
+
+    with session.begin():
+        root = get_row(session, m.profiles, profile_id, lock=True)
+        latest = get_row(session, m.profile_versions, root["current_version_id"])
+        if latest["id"] != current.version_id:
+            raise HTTPException(409, "解析期间档案版本已变化，请重新读取后再导入")
+        new_id = session.scalar(
+            m.profile_versions.insert()
+            .values(
+                profile_id=profile_id,
+                version=latest["version"] + 1,
+                **profile_values(merged),
+            )
+            .returning(m.profile_versions.c.id)
+        )
+        values = {"current_version_id": new_id}
+        if body.set_default_resume:
+            values["default_resume_id"] = resume_id
+        session.execute(m.profiles.update().where(m.profiles.c.id == profile_id).values(**values))
+        status = "needs_review" if extraction.uncertain else "ready"
+        row = (
+            session.execute(
+                m.resume_imports.insert()
+                .values(
+                    profile_id=profile_id,
+                    resume_id=resume_id,
+                    source_profile_version_id=current.version_id,
+                    target_profile_version_id=new_id,
+                    status=status,
+                    mode=body.mode,
+                    source_hash=resume["sha256"],
+                    parser_version=PARSER_VERSION,
+                    prompt_version=PROMPT_VERSION,
+                    model=settings.vision_model,
+                    extraction=extraction.model_dump(mode="json"),
+                    warnings=extraction.warnings,
+                )
+                .returning(m.resume_imports)
+            )
+            .mappings()
+            .one()
+        )
+        result_profile = profile_read(session, get_row(session, m.profiles, profile_id))
+        result = resume_import_read(row, result_profile)
+    etag(response, result_profile.version)
+    return result
 
 
 @router.get("/artifacts/{artifact_id}/content", tags=["resumes"])
