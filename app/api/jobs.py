@@ -46,9 +46,7 @@ def read_job(job_id: UUID, session: DB):
     return job_read(session, get_row(session, m.jobs, job_id))
 
 
-@router.get("/analyses/{analysis_id}")
-def read_analysis(analysis_id: UUID, session: DB):
-    row = get_row(session, m.analyses, analysis_id)
+def analysis_read(session, row):
     result = dict(row)
     result["score"] = str(row["score"]) if row["score"] is not None else None
     snapshot = get_row(session, m.job_snapshots, row["job_snapshot_id"])
@@ -65,4 +63,38 @@ def read_analysis(analysis_id: UUID, session: DB):
     )
     result["eligible"] = row["eligible"] and result["is_current"]
     result["job_id"] = job["id"]
+    result["job_title"] = job["title"]
+    result["company_name"] = job["company_name"]
+    result["profile_id"] = profile["id"]
+    result["profile_name"] = profile["name"]
+    result["policy_id"] = policy["id"]
+    result["policy_name"] = policy["name"]
     return result
+
+
+@router.get("/analyses")
+def list_analyses(
+    session: DB,
+    cursor: Cursor = None,
+    limit: Limit = 20,
+    profile_id: UUID | None = None,
+    status: str | None = None,
+):
+    statement = sa.select(m.analyses)
+    if profile_id is not None:
+        statement = statement.join(
+            m.profile_versions,
+            m.profile_versions.c.id == m.analyses.c.profile_version_id,
+        ).where(m.profile_versions.c.profile_id == profile_id)
+    if status is not None:
+        if status not in {"queued", "running", "ready", "needs_review", "failed"}:
+            raise HTTPException(422, "无效分析状态")
+        statement = statement.where(m.analyses.c.status == status)
+    scope = f"analyses:{profile_id}:{status}"
+    rows, next_cursor = page_query(session, m.analyses, statement, cursor, limit, scope)
+    return {"items": [analysis_read(session, row) for row in rows], "next_cursor": next_cursor}
+
+
+@router.get("/analyses/{analysis_id}")
+def read_analysis(analysis_id: UUID, session: DB):
+    return analysis_read(session, get_row(session, m.analyses, analysis_id))

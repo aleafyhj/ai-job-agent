@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>AI Job Agent 控制台</title>
+  <link rel="stylesheet" href="/admin/assets/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#overview" aria-label="AI Job Agent 首页">
+        <span class="brand-mark">A</span>
+        <span><strong>AI Job Agent</strong><small>BOSS直聘工作台</small></span>
+      </a>
+      <nav aria-label="主导航">
+        <button class="nav-item active" data-view="overview"><span>概</span>概览</button>
+        <button class="nav-item" data-view="profiles"><span>人</span>候选人档案</button>
+        <button class="nav-item" data-view="policies"><span>策</span>匹配策略</button>
+        <button class="nav-item" data-view="jobs"><span>职</span>职位与分析</button>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="platform-dot"></span>
+        <div><strong>招聘平台</strong><small>仅 BOSS直聘</small></div>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <button id="menuButton" class="icon-button menu-button" aria-label="切换导航">☰</button>
+        <div><p class="eyebrow">本地管理控制台</p><h1 id="pageTitle">概览</h1></div>
+        <div class="topbar-actions">
+          <span id="connectionBadge" class="status-badge muted">未连接</span>
+          <button id="refreshButton" class="button secondary">刷新数据</button>
+          <button id="tokenButton" class="button ghost">API Token</button>
+        </div>
+      </header>
+
+      <div id="globalNotice" class="notice hidden" role="status"></div>
+
+      <section id="overviewView" class="view active" aria-labelledby="pageTitle">
+        <div class="hero-card">
+          <div>
+            <p class="eyebrow">AUTOMATION STATUS</p>
+            <h2>从简历档案到职位匹配，集中查看每一步。</h2>
+            <p>控制台只管理数据和查看结果，不会在页面打开时自动点击“立即沟通”。</p>
+          </div>
+          <div class="hero-visual" aria-hidden="true"><span>70</span><small>匹配阈值</small></div>
+        </div>
+        <div class="metric-grid">
+          <article class="metric"><span>候选人档案</span><strong id="profileCount">—</strong><small id="profileCountHint">等待连接</small></article>
+          <article class="metric"><span>匹配策略</span><strong id="policyCount">—</strong><small id="policyCountHint">等待连接</small></article>
+          <article class="metric"><span>已采集职位</span><strong id="jobCount">—</strong><small id="jobCountHint">等待连接</small></article>
+          <article class="metric"><span>分析结果</span><strong id="analysisCount">—</strong><small id="analysisCountHint">等待连接</small></article>
+        </div>
+        <div class="two-column">
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">RECENT MATCHES</p><h3>最近分析</h3></div><button class="text-button" data-go="jobs">查看全部</button></div>
+            <div id="recentAnalyses" class="stack-list empty-state">连接后显示最近分析</div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><p class="eyebrow">SAFETY</p><h3>自动化守卫</h3></div></div>
+            <ul class="guard-list">
+              <li><span class="check">✓</span><div><strong>证据校验</strong><small>技能和岗位需求均需保留原文依据</small></div></li>
+              <li><span class="check">✓</span><div><strong>70分阈值</strong><small>不确定项不会被当作已满足</small></div></li>
+              <li><span class="check">✓</span><div><strong>沟通保持关闭</strong><small>当前控制台不提供真实投递按钮</small></div></li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="profilesView" class="view">
+        <div class="section-toolbar"><div><p class="eyebrow">CANDIDATES</p><h2>候选人档案</h2><p>上传简历后可自动补充技能、经验和教育信息。</p></div><button id="newProfileButton" class="button primary">新建档案</button></div>
+        <div class="master-detail">
+          <div class="panel list-panel"><div id="profileList" class="stack-list empty-state">暂无档案</div></div>
+          <div id="profileDetail" class="panel detail-panel empty-state">从左侧选择一个档案</div>
+        </div>
+      </section>
+
+      <section id="policiesView" class="view">
+        <div class="section-toolbar"><div><p class="eyebrow">MATCH RULES</p><h2>匹配策略</h2><p>设置匹配阈值、每日上限和自动申请开关。</p></div><button id="newPolicyButton" class="button primary">新建策略</button></div>
+        <div id="policyList" class="card-grid empty-state">暂无策略</div>
+      </section>
+
+      <section id="jobsView" class="view">
+        <div class="section-toolbar"><div><p class="eyebrow">BOSS JOBS</p><h2>职位与分析</h2><p>查看桌面采集器保存的职位正文、分数和复核状态。</p></div><select id="analysisProfileFilter" aria-label="按档案筛选"><option value="">全部档案</option></select></div>
+        <div class="master-detail jobs-layout">
+          <div class="panel list-panel"><div id="jobList" class="stack-list empty-state">暂无职位</div></div>
+          <div id="jobDetail" class="panel detail-panel empty-state">从左侧选择一个职位</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="tokenDialog">
+    <form id="tokenForm" method="dialog" class="dialog-card">
+      <div><p class="eyebrow">LOCAL ACCESS</p><h2>连接后端</h2><p>填写本地 <code>JOB_AGENT_API_TOKEN</code>。仅保存在当前浏览器会话中。</p></div>
+      <label>API Token<input id="tokenInput" type="password" minlength="32" required autocomplete="off" placeholder="至少32个字符"></label>
+      <div class="dialog-actions"><button type="button" class="button ghost" data-close-dialog>取消</button><button type="submit" class="button primary">连接</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="profileDialog">
+    <form id="profileForm" method="dialog" class="dialog-card">
+      <div><p class="eyebrow">NEW CANDIDATE</p><h2>创建空白档案</h2><p>创建后上传简历，由千问提取技能信息。</p></div>
+      <label>档案名称<input name="name" maxlength="100" required placeholder="例如：我的AI开发档案"></label>
+      <label>目标城市<input name="cities" placeholder="上海, 杭州（可选）"></label>
+      <div class="dialog-actions"><button type="button" class="button ghost" data-close-dialog>取消</button><button type="submit" class="button primary">创建档案</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="policyDialog">
+    <form id="policyForm" method="dialog" class="dialog-card">
+      <div><p class="eyebrow">NEW POLICY</p><h2>创建匹配策略</h2></div>
+      <label>策略名称<input name="name" maxlength="100" required value="BOSS直聘默认策略"></label>
+      <div class="form-row"><label>匹配阈值<input name="threshold" type="number" min="0" max="100" step="0.1" value="70" required></label><label>每日上限<input name="dailyLimit" type="number" min="1" max="100" value="20" required></label></div>
+      <label class="checkbox"><input name="autoApply" type="checkbox"><span>允许自动申请（当前桌面沟通仍不会由控制台触发）</span></label>
+      <div class="dialog-actions"><button type="button" class="button ghost" data-close-dialog>取消</button><button type="submit" class="button primary">创建策略</button></div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script src="/admin/assets/app.js" defer></script>
+</body>
+</html>

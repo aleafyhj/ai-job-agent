@@ -100,6 +100,11 @@ def test_visual_collection_dedup_queries_and_stale_analysis(database, tmp_path):
         assert response["eligible"] is True
         assert response["match_evidence"]["decision"] == record["decision"]
         assert response["prompt_version"] == "desktop-v4"
+        analysis_page = client.get("/api/v1/analyses", params={"profile_id": profile_id}).json()
+        assert len(analysis_page["items"]) == 1
+        assert analysis_page["items"][0]["job_title"] == card.title
+        assert analysis_page["items"][0]["profile_name"] == "Test"
+        assert client.get("/api/v1/analyses", params={"status": "invalid"}).status_code == 422
         review_record = {
             **record,
             "decision": {

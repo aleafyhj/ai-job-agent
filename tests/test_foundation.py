@@ -55,6 +55,20 @@ def test_not_found_and_unexpected_error_are_traceable():
             assert "private-error-detail" not in response.text
 
 
+def test_admin_console_is_local_static_shell_without_embedded_credentials():
+    with TestClient(create_app(Settings(_env_file=None))) as client:
+        page = client.get("/admin")
+        script = client.get("/admin/assets/app.js")
+        styles = client.get("/admin/assets/styles.css")
+    assert page.status_code == script.status_code == styles.status_code == 200
+    assert "AI Job Agent 控制台" in page.text
+    assert "JOB_AGENT_API_TOKEN" in page.text
+    assert "default-src 'self'" in page.headers["Content-Security-Policy"]
+    assert page.headers["X-Content-Type-Options"] == "nosniff"
+    assert "DASHSCOPE_API_KEY" not in page.text + script.text
+    assert "localStorage" not in script.text
+
+
 def test_database_config_hides_credentials_and_rejects_other_backends():
     url = "postgresql+psycopg://candidate:private-password@localhost/test"
     settings = Settings(_env_file=None, database_url=url)

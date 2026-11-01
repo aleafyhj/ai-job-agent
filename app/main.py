@@ -1,11 +1,13 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException
 
 from app import __version__
@@ -18,6 +20,7 @@ from app.database import make_engine, make_session_factory
 from app.storage import RequestBodyLimit
 
 logger = logging.getLogger(__name__)
+WEB_ROOT = Path(__file__).with_name("web")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -94,4 +97,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(health_router, prefix="/api/v1")
     application.include_router(resources_router, prefix="/api/v1")
     application.include_router(jobs_router, prefix="/api/v1")
+    application.mount(
+        "/admin/assets",
+        StaticFiles(directory=WEB_ROOT / "assets"),
+        name="admin-assets",
+    )
+
+    @application.get("/admin", include_in_schema=False)
+    @application.get("/admin/", include_in_schema=False)
+    def admin_console():
+        return FileResponse(
+            WEB_ROOT / "index.html",
+            media_type="text/html",
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Security-Policy": (
+                    "default-src 'self'; script-src 'self'; style-src 'self'; "
+                    "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; "
+                    "base-uri 'none'; form-action 'self'"
+                ),
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "no-referrer",
+            },
+        )
+
     return application
