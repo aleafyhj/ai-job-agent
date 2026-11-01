@@ -239,14 +239,16 @@ $("#tokenForm").addEventListener("submit", async event => {
 });
 
 $("#profileForm").addEventListener("submit", async event => {
-  event.preventDefault(); const form = new FormData(event.currentTarget);
+  event.preventDefault();
+  const formElement = event.currentTarget;
+  const form = new FormData(formElement);
   try {
     const result = await api("/profiles", {method: "POST", body: JSON.stringify({
       name: form.get("name"), skills: [], experience_years: null, education: {},
       preferred_cities: String(form.get("cities") || "").split(/[,，]/).map(x => x.trim()).filter(Boolean),
       remote_preference: "any", facts: {},
     })});
-    $("#profileDialog").close(); event.currentTarget.reset(); await loadAll(); showView("profiles"); await selectProfile(result.data.id); toast("档案已创建");
+    $("#profileDialog").close(); formElement.reset(); await loadAll(); showView("profiles"); await selectProfile(result.data.id); toast("档案已创建");
   } catch (error) { toast(error.message, true); }
 });
 

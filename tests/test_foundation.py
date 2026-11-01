@@ -67,6 +67,8 @@ def test_admin_console_is_local_static_shell_without_embedded_credentials():
     assert page.headers["X-Content-Type-Options"] == "nosniff"
     assert "DASHSCOPE_API_KEY" not in page.text + script.text
     assert "localStorage" not in script.text
+    assert "const formElement = event.currentTarget" in script.text
+    assert "event.currentTarget.reset()" not in script.text
 
 
 def test_database_config_hides_credentials_and_rejects_other_backends():
