@@ -5,7 +5,7 @@ import json
 from typing import Annotated, Literal
 from urllib.request import Request, urlopen
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 Coordinate = Annotated[int, Field(gt=0, lt=1000, strict=True)]
 ANALYSIS_VERSION = "desktop-v3"
@@ -52,6 +52,9 @@ class Screen(BaseModel):
     list_scroll: Box | None = None
     detail_scroll: Box | None = None
     detail_start_visible: bool = False
+    list_end_visible: bool = False
+    list_loading: bool = False
+    discarded_cards: int = Field(default=0, ge=0, le=30)
 
 
 class Vision:
@@ -93,9 +96,12 @@ class Vision:
             "而不是只看最后截图。其他阶段只转录可见正文，requirements一律为空数组，"
             "hard_conditions一律unknown，不进行逐屏技能匹配。"
             "阶段list只识别卡片、当前职位和滚动点，detail_text返回空字符串，避免重复转录。"
+            "list_end_visible仅当左侧职位列表明确显示没有更多职位/已经到底/暂无更多时true，"
+            "右侧详情结束、地图、浏览器页底和没有新卡片不能证明列表结束。"
+            "list_loading仅当列表有明确加载中指示时true。"
             f"本次阶段={phase}。schema={schema}"
         )
-        return self._call(image, skills, instruction, Screen)
+        return self._call(image, skills, instruction, Screen, list_only=phase == "list")
 
     def ground_title(self, image, card):
         instruction = (
@@ -107,7 +113,7 @@ class Vision:
         )
         return self._call(image, {"expected_title": card.title}, instruction, TitleTarget)
 
-    def _call(self, image, skills, instruction, response_model):
+    def _call(self, image, skills, instruction, response_model, *, list_only=False):
         body = {
             "model": self.settings.vision_model,
             "messages": [
@@ -138,7 +144,37 @@ class Vision:
         try:
             with urlopen(request, timeout=60) as response:
                 result = json.loads(response.read(2 * 1024 * 1024))
-            return response_model.model_validate_json(result["choices"][0]["message"]["content"])
+            payload = json.loads(result["choices"][0]["message"]["content"])
+            if list_only:
+                raw_cards = payload.get("cards", [])
+                if not isinstance(raw_cards, list) or len(raw_cards) > 30:
+                    raise ValueError("Invalid cards collection")
+                cards = []
+                for item in raw_cards:
+                    try:
+                        cards.append(Card.model_validate(item).model_dump())
+                    except ValidationError:
+                        pass  # A clipped invalid card cannot be clicked or saved.
+                payload["cards"] = cards
+                payload["discarded_cards"] = len(raw_cards) - len(cards)
+                if payload["discarded_cards"]:
+                    payload["list_end_visible"] = False
+                if payload.get("selected") is not None:
+                    try:
+                        Card.model_validate(payload["selected"])
+                    except ValidationError:
+                        payload["selected"] = None
+            return response_model.model_validate(payload)
+        except ValidationError as exc:
+            fields = [
+                {"field": list(item["loc"]), "type": item["type"]}
+                for item in exc.errors(
+                    include_input=False, include_context=False, include_url=False
+                )
+            ]
+            raise RuntimeError(
+                "视觉模型输出字段不合格，已停止：" + json.dumps(fields, ensure_ascii=False)
+            ) from None
         except Exception as exc:
             # Class names aid diagnosis without exposing provider bodies, request
             # headers, resume evidence, or credential-bearing endpoint URLs.

@@ -20,6 +20,7 @@ from app.database import make_engine
 from app.desktop import Desktop, pixel
 from app.desktop_collection import collect_detail
 from app.desktop_report import ground_card, normalized, observe, verify_selection
+from app.list_progress import ListProgress
 from app.mouse_bridge import BridgeMouse
 from app.vision import Card, Vision, match_report
 
@@ -46,13 +47,106 @@ def save_state(path, state):
 
 def has_card_identity(card):
     unknown = {"未知", "未知公司", "unknown", "n/a", "不详", "未显示", "无法识别"}
-    return all(
+    # Reserve space below the title for the company/address row. On the
+    # supported maximized primary-screen layout, edge cards must be scrolled
+    # into view before selection; an LLM can otherwise invent clipped fields.
+    return card.center[1] <= 850 and all(
         normalized(value) not in unknown
         for value in (card.title, card.company, card.city, card.salary)
     )
 
 
+def scan_list(desktop, vision, root, args):
+    folder = root / "runs" / uuid4().hex
+    folder.mkdir(parents=True)
+    progress = ListProgress()
+    stats = {
+        "status": "running",
+        "mode": "scan_list",
+        "cards": {},
+        "observations": [],
+        "list_scrolls": 0,
+        "duplicate_skips": 0,
+        "clicks": 0,
+    }
+    try:
+        for page in range(args.pages):
+            image, size = desktop.capture()
+            screen, _, observation = observe(vision, image, {"skills": []}, "list", root)
+            stats["observations"].append(str(observation.relative_to(root)))
+            if screen.blocked or screen.uncertain:
+                raise RuntimeError("列表识别不确定，停止扫描")
+            cards = [card for card in screen.cards if has_card_identity(card)]
+            for card in cards:
+                key = identity(card)
+                if key in stats["cards"]:
+                    stats["duplicate_skips"] += 1
+                stats["cards"][key] = card.model_dump()
+            reason = progress.observe(
+                [identity(card) for card in cards],
+                end=screen.list_end_visible,
+                loading=screen.list_loading,
+            )
+            if reason:
+                stats["stop_reason"] = reason
+                break
+            if page + 1 == args.pages:
+                stats["stop_reason"] = "page_limit"
+                break
+            if screen.list_loading:
+                time.sleep(args.settle)
+                continue
+            point = args.left_scroll or (screen.list_scroll.center if screen.list_scroll else None)
+            if point is None:
+                raise RuntimeError("列表滚动点缺失，停止扫描")
+            desktop.scroll(*pixel(point, size), ticks=-args.ticks)
+            stats["list_scrolls"] += 1
+            print("列表扫描:", page + 1, "去重职位数:", len(stats["cards"]))
+            time.sleep(args.settle)
+        stats["status"] = "completed"
+    except BaseException as exc:
+        stats.update(status="stopped", error_type=type(exc).__name__)
+        raise
+    finally:
+        save_state(folder / "summary.json", stats)
+        print("列表扫描报告:", (folder / "summary.json").resolve())
+        print("停止原因:", stats.get("stop_reason", stats.get("error_type")))
+    return stats
+
+
 def run(desktop, vision, profile, policy, root, args, before_communicate=None, on_analysis=None):
+    if profile.get("facts", {}).get("data_kind") == "simulation" and getattr(
+        args, "communicate", False
+    ):
+        raise ValueError("模拟档案仅用于采集评分，禁止沟通")
+    folder = root / "runs" / uuid4().hex
+    folder.mkdir(parents=True)
+    stats = {
+        "status": "running",
+        "records": [],
+        "observations": [],
+        "list_scrolls": 0,
+        "duplicate_skips": 0,
+        "unknown_skips": 0,
+        "stale_rejections": 0,
+        "communicate": getattr(args, "communicate", False),
+    }
+    try:
+        result = _run(
+            desktop, vision, profile, policy, root, args, before_communicate, on_analysis, stats
+        )
+        stats["status"] = "completed"
+        return result
+    except BaseException as exc:
+        stats.update(status="stopped", error_type=type(exc).__name__)
+        raise
+    finally:
+        save_state(folder / "summary.json", stats)
+        print("本次遍历报告:", (folder / "summary.json").resolve())
+        print("停止原因:", stats.get("stop_reason", stats.get("error_type")))
+
+
+def _run(desktop, vision, profile, policy, root, args, before_communicate, on_analysis, stats):
     """Bounded loop. One fresh card click at a time; no stale per-page coordinate batch."""
     simulation = profile.get("facts", {}).get("data_kind") == "simulation"
     if simulation and getattr(args, "communicate", False):
@@ -73,6 +167,7 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None, o
             "remote_preference",
         )
     }
+    progress = ListProgress()
     for page in range(args.pages):
         while processed < args.jobs:
             image, size = desktop.capture()
@@ -82,45 +177,73 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None, o
             left_scroll = args.left_scroll or (
                 screen.list_scroll.center if screen.list_scroll else None
             )
-            card = next(
-                (
-                    item
-                    for item in screen.cards
-                    if has_card_identity(item) and identity(item) not in seen
-                ),
-                None,
-            )
-            if card is None:
-                break
-            key = identity(card)
-            seen.add(key)
-            if card.company in policy.get("blocked_companies", []):
+            stats["observations"].append(str(observation_folder.relative_to(root)))
+            if screen.list_loading:
+                reason = progress.observe([], loading=True)
+                if reason:
+                    stats["stop_reason"] = reason
+                    return processed
+                time.sleep(args.settle)
                 continue
-            history_key = str(profile["id"]) + ":" + key
-            previous = state.get(history_key)
-            if previous is None:
-                # Preserve earlier database identity keys while recognizing the
-                # same card despite punctuation/case changes in model output.
-                for name, item in state.items():
-                    if (
-                        name.startswith(str(profile["id"]) + ":")
-                        and identity(Card.model_validate(item["card"])) == key
-                    ):
-                        history_key, previous = name, item
-                        break
-            if previous and (
-                previous["state"].startswith("communication_")
-                or (
-                    not args.communicate
-                    and previous.get("state") == "analyzed"
-                    and previous.get("profile_version") == profile["version_id"]
-                    and previous.get("policy_version") == policy["version_id"]
+            card = None
+            for item in screen.cards:
+                if not has_card_identity(item):
+                    stats["unknown_skips"] += 1
+                    continue
+                key = identity(item)
+                if key in seen:
+                    stats["duplicate_skips"] += 1
+                    continue
+                history_key = str(profile["id"]) + ":" + key
+                previous = state.get(history_key)
+                if previous is None:
+                    for name, value in state.items():
+                        if (
+                            name.startswith(str(profile["id"]) + ":")
+                            and identity(Card.model_validate(value["card"])) == key
+                        ):
+                            history_key, previous = name, value
+                            break
+                cached = previous and (
+                    previous["state"].startswith("communication_")
+                    or (
+                        not args.communicate
+                        and previous.get("state") == "analyzed"
+                        and previous.get("profile_version") == profile["version_id"]
+                        and previous.get("policy_version") == policy["version_id"]
+                    )
                 )
-            ):
-                continue
+                seen.add(key)
+                if cached or item.company in policy.get("blocked_companies", []):
+                    stats["duplicate_skips"] += 1
+                    continue
+                card = item
+                break
+            if card is None:
+                reason = progress.observe(
+                    [identity(item) for item in screen.cards if has_card_identity(item)],
+                    end=screen.list_end_visible,
+                    loading=screen.list_loading,
+                )
+                if reason:
+                    stats["stop_reason"] = reason
+                    return processed
+                break
             target = ground_card(vision, image, card, screen.cards, observation_folder)
             print("精确标题点击坐标:", target)
-            desktop.click(*target, expected=image, target_only=True, diagnostics=observation_folder)
+            try:
+                desktop.click(
+                    *target, expected=image, target_only=True, diagnostics=observation_folder
+                )
+            except RuntimeError as exc:
+                if not any(text in str(exc) for text in ("目标标题区域已变化", "页面已变化")):
+                    raise
+                stats["stale_rejections"] += 1
+                if stats["stale_rejections"] > 2:
+                    raise
+                seen.discard(key)
+                print("标题画面变化，未点击；丢弃坐标并重新截图识别")
+                continue
             (observation_folder / "action.json").write_text(
                 json.dumps(
                     {
@@ -216,14 +339,19 @@ def run(desktop, vision, profile, policy, root, args, before_communicate=None, o
                 continue
             state[history_key] = record
             save_state(state_path, state)
+            stats["records"].append(record)
             print(f"已分析 {processed}: {card.title} | 匹配度={value} | 硬条件={hard}")
         if processed >= args.jobs:
+            stats["stop_reason"] = "job_limit"
             break
         if page + 1 < args.pages:
             if left_scroll is None:
                 raise RuntimeError("未识别列表滚动区域，停止翻页")
             desktop.scroll(*pixel(left_scroll, size), ticks=-args.ticks)
+            stats["list_scrolls"] += 1
+            print("列表滚动次数:", stats["list_scrolls"])
             time.sleep(args.settle)
+    stats.setdefault("stop_reason", "page_limit")
     return processed
 
 
@@ -240,6 +368,7 @@ def main():
             "click-card",
             "collect-detail",
             "run",
+            "scan-list",
         ],
     )
     parser.add_argument("--image", type=Path, help="仅用于 inspect：识别已有图片，不操作桌面")
@@ -321,6 +450,8 @@ def main():
                 result, _, _ = observe(vision, after, {"skills": []}, "detail", root)
                 verify_selection(card, result)
                 print("已确认：右侧详情切换到选中的职位；没有执行沟通")
+        elif args.action == "scan-list":
+            scan_list(desktop, Vision(settings), root, args)
         elif args.action == "collect-detail":
             vision = Vision(settings)
             image, _ = desktop.capture()

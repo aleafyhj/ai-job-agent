@@ -362,3 +362,112 @@ def test_pointer_mismatch_records_values_without_click(tmp_path):
     report = json.loads((tmp_path / "pointer.json").read_text(encoding="utf-8"))
     assert report["target"] == [553, 716]
     assert report["physical_position"] == [400, 500]
+
+
+@pytest.mark.parametrize("stale_first", [False, True])
+def test_continuous_list_dedup_and_confirmed_end(tmp_path, monkeypatch, stale_first):
+    monkeypatch.setattr("app.boss_desktop.time.sleep", lambda _: None)
+    viewport = [0]
+    clicks = []
+
+    def frame():
+        data = screen()
+        data.cards = [data.cards[0].model_copy(update={"title": "A" if viewport[0] == 0 else "B"})]
+        data.selected = data.cards[0]
+        data.list_end_visible = viewport[0] >= 2
+        return data
+
+    def scroll(*args, **kwargs):
+        viewport[0] += 1
+
+    attempts = [0]
+
+    def click(*a, **kw):
+        attempts[0] += 1
+        if stale_first and attempts[0] == 1:
+            raise RuntimeError("目标标题区域已变化，未点击")
+        clicks.append(viewport[0])
+
+    desktop = SimpleNamespace(
+        capture=lambda: (png_bytes(), (1000, 1000)),
+        click=click,
+        scroll=scroll,
+    )
+    vision = SimpleNamespace(
+        inspect=lambda *a: frame(),
+        ground_title=lambda image, card: TitleTarget(
+            title=card.title, center=(500, 500), uncertain=False
+        ),
+    )
+    profile = dict(
+        id="p",
+        version_id="p1",
+        skills=[{"evidence": "项目"}],
+        education={},
+        experience_years=2,
+        preferred_cities=[],
+        remote_preference="any",
+    )
+    policy = dict(version_id="v1", threshold=70, comparison="gte")
+    args = SimpleNamespace(
+        pages=8,
+        jobs=10,
+        detail_scrolls=1,
+        settle=1,
+        ticks=3,
+        communicate=False,
+        right_scroll=None,
+        left_scroll=[200, 500],
+    )
+    assert run(desktop, vision, profile, policy, tmp_path, args) == 2
+    assert clicks == [0, 1]
+    report = json.loads(next((tmp_path / "runs").rglob("summary.json")).read_text(encoding="utf-8"))
+    assert report["stop_reason"] == "list_end_confirmed"
+    assert report["list_scrolls"] == 3
+    viewport[0] = 0
+    assert run(desktop, vision, profile, policy, tmp_path, args) == 0
+    assert clicks == [0, 1]
+    assert len(json.loads((tmp_path / "history.json").read_text(encoding="utf-8"))) == 2
+
+
+def test_loading_list_waits_without_input(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.boss_desktop.time.sleep", lambda _: None)
+    data = screen()
+    data.list_loading = True
+    desktop = SimpleNamespace(capture=lambda: (png_bytes(), (1000, 1000)))
+    profile = dict(
+        id="p",
+        skills=[],
+        education={},
+        experience_years=0,
+        preferred_cities=[],
+        remote_preference="any",
+    )
+    args = SimpleNamespace(pages=2, jobs=1, settle=1, left_scroll=None)
+    assert run(desktop, SimpleNamespace(inspect=lambda *a: data), profile, {}, tmp_path, args) == 0
+    report = json.loads(next((tmp_path / "runs").rglob("summary.json")).read_text(encoding="utf-8"))
+    assert report["stop_reason"] == "loading_timeout"
+    assert report["list_scrolls"] == 0
+
+
+def test_scan_list_never_clicks_and_confirms_end(tmp_path, monkeypatch):
+    from app.boss_desktop import scan_list
+
+    monkeypatch.setattr("app.boss_desktop.time.sleep", lambda _: None)
+    data = screen()
+    data.list_end_visible = True
+    scrolls = []
+    desktop = SimpleNamespace(
+        capture=lambda: (png_bytes(), (1000, 1000)), scroll=lambda *a, **kw: scrolls.append(a)
+    )
+    result = scan_list(
+        desktop,
+        SimpleNamespace(inspect=lambda *a: data),
+        tmp_path,
+        SimpleNamespace(pages=5, left_scroll=[200, 500], ticks=3, settle=1),
+    )
+    assert result["stop_reason"] == "list_end_confirmed"
+    assert len(result["cards"]) == 1
+    assert result["duplicate_skips"] == 1
+    assert result["clicks"] == 0
+    assert len(scrolls) == 1
