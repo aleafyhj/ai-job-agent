@@ -40,13 +40,24 @@ BOSS直聘采用截图/真实鼠标模式（千问视觉），默认只读。见
 
 ## 本地运行（PowerShell）
 
-需要 Python 3.12 或 3.13 和 uv。`uv.lock` 锁定完整依赖版本，应与 pyproject.toml 一起提交。不要使用本机默认的 Python 3.9。
+需要 Python 3.12 或 3.13。推荐使用 uv；`uv.lock` 锁定完整依赖版本，应与 `pyproject.toml` 一起提交。没有 uv 时也可以通过 `requirements.txt` 安装运行依赖。不要使用本机默认的 Python 3.9。
 
 ```powershell
 uv sync --locked --python 3.12
 Copy-Item .env.example .env
 uv run --locked python -m app
 ```
+
+只使用 pip 的等价安装方式：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
+.\.venv\Scripts\python.exe -m app
+```
+
+`requirements.txt` 固定运行依赖版本；开发测试依赖以 `pyproject.toml` 和 `uv.lock` 为准。
 
 已有 `.env` 时不要覆盖，按需修改配置。进程默认监听 `127.0.0.1:8000`，使用 Ctrl+C 停止。
 
@@ -77,7 +88,7 @@ uv run --locked ruff format --check app tests
 
 ## PostgreSQL 数据库（第二步）
 
-本机开发库已接通：`127.0.0.1:5432/ai_job_agent`，应用使用同名专用非管理员账号，当前迁移版本为 `0002`，API 就绪检查通过。真实连接凭据仅保存在被 Git 忽略的 `.env`；以下初始化说明用于新环境，不需在本机重复创建账号和数据库。
+本机开发库已接通：`127.0.0.1:5432/ai_job_agent`，应用使用同名专用非管理员账号，当前迁移版本为 `0004`，API 就绪检查通过。真实连接凭据仅保存在被 Git 忽略的 `.env`；以下初始化说明用于新环境，不需在本机重复创建账号和数据库。
 
 需要运行中的 PostgreSQL（本次在 PostgreSQL 18 上验证）。先由数据库管理员创建专用数据库和用户，例如在 psql 中执行：
 
