@@ -87,7 +87,7 @@ Resume：`id,profile_id,version,filename,mime_type,size,sha256,created_at`。
 
 当前 Resume 还返回 artifact_id，用于 `/artifacts/{id}/content` 下载。上传接受 application/pdf 或 application/vnd.openxmlformats-officedocument.wordprocessingml.document，扩展名须对应；最大 10 MiB。拒绝损坏/加密 PDF、空文件、超过 100 页的 PDF、无效 DOCX 包和宏内容；上传本身不执行文档中的内容。整个写请求限制 12 MiB；文件不合格返回 422，超限返回 413。指定其他档案的默认简历返回 409。
 
-ResumeImportWrite：`mode` 为 `fill_missing`（默认，人工数据优先）或 `replace_resume_fields`，`set_default_resume` 默认 true。导入要求 If-Match 与当前档案版本一致；外部模型调用不占用数据库事务，落库前再次锁定并校验版本。PDF/DOCX 文本在本地提取，常见联系方式脱敏后发送千问；技能、教育和年限必须包含可在输入中核验的连续原文证据。解析结果、模型/提示词/解析器版本和源文件散列写入不可变 resume_imports，不保存提取出的整份明文。每次成功导入创建新的 profile_versions；扫描 PDF 暂不支持 OCR。不确定结果允许 `fill_missing` 并标为 needs_review，但禁止 replace。
+ResumeImportWrite：`mode` 为 `fill_missing`（默认，人工数据优先）或 `replace_resume_fields`，`set_default_resume` 默认 true。导入要求 If-Match 与当前档案版本一致；外部模型调用不占用数据库事务，落库前再次锁定并校验版本。PDF/DOCX 文本在本地提取，常见联系方式脱敏后发送千问；技能、教育和年限必须包含可在输入中核验的连续原文证据。resume-profile-v2 会将格式差异映射回真实连续原文；模型改写的技能证据仅能回退到包含规范技能名的真实原文行，回退项强制降为 basic 并清空技能年限，否则丢弃该技能。无法锚定的总年限清空，结果标为 needs_review。解析结果、模型/提示词/解析器版本和源文件散列写入不可变 resume_imports，不保存提取出的整份明文。每次成功导入创建新的 profile_versions；扫描 PDF 暂不支持 OCR。不确定结果允许 `fill_missing` 并标为 needs_review，但禁止 replace。
 
 Task：`id,type,status,run_id,progress:{stage,completed,total},attempt_count,error:{code,message,retryable},created_at,started_at,finished_at`。未知 total 为 null，不伪造进度百分比。
 

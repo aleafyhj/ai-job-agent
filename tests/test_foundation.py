@@ -69,6 +69,7 @@ def test_admin_console_is_local_static_shell_without_embedded_credentials():
     assert "localStorage" not in script.text
     assert "const formElement = event.currentTarget" in script.text
     assert "event.currentTarget.reset()" not in script.text
+    assert "data-import-resume" in script.text
 
 
 def test_database_config_hides_credentials_and_rejects_other_backends():

@@ -125,7 +125,7 @@ function renderProfileDetail() {
   if (!item) { root.className = "panel detail-panel empty-state"; root.textContent = "从左侧选择一个档案"; return; }
   const skills = item.skills.length ? item.skills.map(skill => `<span class="tag"><b>${esc(skill.canonical_name)}</b> · ${esc(skill.level)}${skill.years ? ` · ${esc(skill.years)}年` : ""}</span>`).join("") : '<span class="pill muted">等待简历导入</span>';
   const education = Object.entries(item.education || {}).filter(([, value]) => value).map(([key, value]) => `<span class="tag">${esc(key)}：${esc(value)}</span>`).join("") || '<span class="pill muted">未填写</span>';
-  const resumes = item.resumes?.length ? item.resumes.map(file => `<span class="tag">v${file.version} · ${esc(file.filename)}</span>`).join("") : '<span class="pill muted">尚未上传</span>';
+  const resumes = item.resumes?.length ? item.resumes.map(file => `<button class="tag resume-action" data-import-resume="${esc(file.id)}">解析 v${file.version} · ${esc(file.filename)}</button>`).join("") : '<span class="pill muted">尚未上传</span>';
   root.className = "panel detail-panel";
   root.innerHTML = `
     <div class="detail-head"><div><p class="eyebrow">PROFILE V${item.version}</p><h2>${esc(item.name)}</h2><p>${esc(item.experience_years ?? "未知")} 年经验 · ${esc(item.preferred_cities.join(" / ") || "未设置城市")}</p></div><span class="pill">${item.skills.length} 项技能</span></div>
@@ -148,14 +148,19 @@ async function uploadResume(event) {
   try {
     const form = new FormData(); form.append("file", file);
     const uploaded = await api(`/profiles/${state.selectedProfile.id}/resumes`, {method: "POST", body: form});
-    const imported = await api(`/profiles/${state.selectedProfile.id}/resumes/${uploaded.data.id}/import`, {
-      method: "POST", headers: {"If-Match": state.profileEtag},
-      body: JSON.stringify({mode: "fill_missing", set_default_resume: true}),
-    });
-    toast(imported.data.status === "needs_review" ? "档案已生成，但存在需人工复核的信息" : "简历解析完成，档案已更新");
-    await loadAll(); await selectProfile(state.selectedProfile.id);
+    await importResume(uploaded.data.id);
   } catch (error) { toast(error.message, true); }
   finally { button.disabled = false; button.textContent = "上传并生成档案"; }
+}
+
+async function importResume(resumeId) {
+  const profileId = state.selectedProfile.id;
+  const imported = await api(`/profiles/${profileId}/resumes/${resumeId}/import`, {
+    method: "POST", headers: {"If-Match": state.profileEtag},
+    body: JSON.stringify({mode: "fill_missing", set_default_resume: true}),
+  });
+  toast(imported.data.status === "needs_review" ? "档案已生成，但存在需人工复核的信息" : "简历解析完成，档案已更新");
+  await loadAll(); await selectProfile(profileId);
 }
 
 function renderPolicies() {
@@ -221,6 +226,7 @@ document.addEventListener("click", event => {
   const nav = event.target.closest("[data-view]"); if (nav) showView(nav.dataset.view);
   const go = event.target.closest("[data-go]"); if (go) showView(go.dataset.go);
   const profile = event.target.closest("[data-profile-id]"); if (profile) selectProfile(profile.dataset.profileId);
+  const resume = event.target.closest("[data-import-resume]"); if (resume) importResume(resume.dataset.importResume).catch(error => toast(error.message, true));
   const job = event.target.closest("[data-job-id]"); if (job) selectJob(job.dataset.jobId);
   const analysisJob = event.target.closest("[data-analysis-job]"); if (analysisJob) { showView("jobs"); selectJob(analysisJob.dataset.analysisJob); }
   if (event.target.closest("[data-close-dialog]")) event.target.closest("dialog").close();

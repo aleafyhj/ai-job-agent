@@ -15,6 +15,7 @@ from app.resume_import import (
     ExtractedEducation,
     ExtractedSkill,
     ResumeExtraction,
+    _validate_evidence,
     extract_resume_text,
     merge_profile,
     redact_contact_details,
@@ -125,6 +126,60 @@ def test_merge_fills_missing_without_overwriting_verified_profile():
     assert merged.education == {"degree": "本科", "major": "计算机科学"}
     assert merged.preferred_cities == ["上海"]
     assert merged.facts == PROFILE["facts"]
+
+
+def test_evidence_is_mapped_back_to_continuous_source_text():
+    result = ResumeExtraction(
+        skills=[
+            ExtractedSkill(
+                canonical_name="Python",
+                level="proficient",
+                evidence="使用python 开发接口",
+            )
+        ],
+        education=ExtractedEducation(
+            degree="本科", major="计算机科学", evidence=["本科 计算机科学"]
+        ),
+        uncertain=False,
+    )
+    source = "项目经历：使用Python\n开发接口\n教育经历：本科　计算机科学"
+    _validate_evidence(result, source, False)
+    assert result.skills[0].evidence == "使用Python\n开发接口"
+    assert result.skills[0].evidence in source
+    assert result.education.evidence == ["本科　计算机科学"]
+    assert result.uncertain is True
+    assert "evidence_repaired" in result.warnings
+
+
+def test_rewritten_evidence_uses_skill_line_and_drops_unsupported_claims():
+    result = ResumeExtraction(
+        skills=[
+            ExtractedSkill(
+                canonical_name="FastAPI",
+                level="proficient",
+                evidence="熟练使用FastAPI构建多个高性能系统并负责完整架构",
+            ),
+            ExtractedSkill(
+                canonical_name="Kubernetes",
+                level="expert",
+                evidence="精通Kubernetes集群治理",
+            ),
+        ],
+        experience_years="3",
+        experience_evidence="拥有三年后端研发经验",
+        uncertain=False,
+    )
+    source = "项目：使用FastAPI开发内部管理接口\n工作经历：2023年至今"
+    _validate_evidence(result, source, False)
+    assert [item.canonical_name for item in result.skills] == ["FastAPI"]
+    assert result.skills[0].evidence == "项目：使用FastAPI开发内部管理接口"
+    assert result.skills[0].level == "basic"
+    assert result.skills[0].years is None
+    assert result.experience_years is None
+    assert result.experience_evidence is None
+    assert {"evidence_repaired", "insufficient_evidence", "experience_ambiguous"} <= set(
+        result.warnings
+    )
 
 
 @pytest.mark.postgres

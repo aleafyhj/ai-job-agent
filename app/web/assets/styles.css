@@ -100,6 +100,8 @@ main { min-width: 0; }
 .tag-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .tag { padding: 7px 10px; border-radius: 8px; background: #edf3f1; font-size: 13px; }
 .tag b { color: var(--teal-dark); }
+.resume-action { color: var(--teal-dark); border: 1px solid #cce3df; cursor: pointer; }
+.resume-action:hover { border-color: var(--teal); background: var(--teal-soft); }
 .upload-box { margin-top: 22px; padding: 20px; border: 1px dashed #8bbab4; border-radius: 14px; background: #f5fbfa; }
 .upload-box h3 { margin: 0 0 6px; }
 .upload-box p { margin: 0 0 14px; font-size: 13px; }

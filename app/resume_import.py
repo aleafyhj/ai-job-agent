@@ -2,7 +2,9 @@
 
 import json
 import re
+import unicodedata
 from decimal import Decimal
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Literal
 from urllib.request import Request, urlopen
@@ -15,7 +17,7 @@ from pypdf import PdfReader
 from app.schemas import ProfileRead, ProfileWrite, Skill
 
 PARSER_VERSION = "resume-text-v1"
-PROMPT_VERSION = "resume-profile-v1"
+PROMPT_VERSION = "resume-profile-v2"
 MAX_RESUME_TEXT_CHARS = 60_000
 WarningCode = Literal[
     "date_overlap",
@@ -23,6 +25,7 @@ WarningCode = Literal[
     "education_ambiguous",
     "experience_ambiguous",
     "skill_level_ambiguous",
+    "evidence_repaired",
     "resume_text_truncated",
     "other",
 ]
@@ -120,26 +123,126 @@ def redact_contact_details(text: str) -> str:
     return text
 
 
+_CHAR_EQUIVALENTS = str.maketrans(
+    {"–": "-", "—": "-", "−": "-", "“": '"', "”": '"', "‘": "'", "’": "'"}
+)
+
+
+def _canonical(value: str, *, positions: bool = False):
+    output: list[str] = []
+    source_positions: list[int] = []
+    for index, char in enumerate(value):
+        normalized = unicodedata.normalize("NFKC", char).translate(_CHAR_EQUIVALENTS).casefold()
+        for item in normalized:
+            if not item.isspace():
+                output.append(item)
+                source_positions.append(index)
+    result = "".join(output)
+    return (result, source_positions) if positions else result
+
+
+def _ground_quote(quote: str, text: str) -> str | None:
+    """Map formatting-only model changes back to a continuous source substring."""
+    if quote in text:
+        return quote
+    needle = _canonical(quote)
+    haystack, positions = _canonical(text, positions=True)
+    if not needle or (offset := haystack.find(needle)) < 0:
+        return None
+    return text[positions[offset] : positions[offset + len(needle) - 1] + 1]
+
+
+def _bounded_line(line: str, anchor: str, limit: int = 2000) -> str:
+    line = line.strip()
+    if len(line) <= limit:
+        return line
+    grounded = _ground_quote(anchor, line)
+    center = line.find(grounded) + len(grounded) // 2 if grounded else len(line) // 2
+    start = max(0, min(len(line) - limit, center - limit // 2))
+    return line[start : start + limit]
+
+
+def _add_warning(extraction: ResumeExtraction, warning: WarningCode):
+    extraction.uncertain = True
+    if warning not in extraction.warnings and len(extraction.warnings) < 30:
+        extraction.warnings.append(warning)
+
+
+def _skill_source_line(skill: ExtractedSkill, text: str) -> str | None:
+    name = _canonical(skill.canonical_name)
+    if not name:
+        return None
+    candidates = [line for line in text.splitlines() if name in _canonical(line)]
+    if not candidates:
+        return None
+    evidence = _canonical(skill.evidence)
+    best = max(
+        candidates,
+        key=lambda line: SequenceMatcher(None, evidence, _canonical(line), autojunk=False).ratio(),
+    )
+    return _bounded_line(best, skill.canonical_name)
+
+
 def _validate_evidence(extraction: ResumeExtraction, text: str, truncated: bool):
-    evidence = [item.evidence for item in extraction.skills]
+    """Ground model evidence in source text and discard unsupported claims conservatively."""
+    grounded_skills = []
+    for skill in extraction.skills:
+        grounded = _ground_quote(skill.evidence, text)
+        if grounded is None:
+            grounded = _skill_source_line(skill, text)
+            if grounded is None:
+                _add_warning(extraction, "insufficient_evidence")
+                continue
+            _add_warning(extraction, "evidence_repaired")
+            skill.level = "basic"
+            skill.years = None
+            _add_warning(extraction, "skill_level_ambiguous")
+        elif grounded != skill.evidence:
+            _add_warning(extraction, "evidence_repaired")
+        skill.evidence = grounded
+        grounded_skills.append(skill)
+    extraction.skills = grounded_skills
+
     if extraction.experience_evidence:
-        evidence.append(extraction.experience_evidence)
-    evidence.extend(extraction.education.evidence)
-    if any(quote not in text for quote in evidence):
-        raise ValueError("模型返回了简历中不存在的证据")
-    education_values = [
-        extraction.education.degree,
-        extraction.education.major,
-        extraction.education.school,
-        extraction.education.graduation_year,
-    ]
-    joined = "\n".join(extraction.education.evidence)
-    if any(value and value not in joined for value in education_values):
-        raise ValueError("教育信息缺少原文证据")
+        grounded = _ground_quote(extraction.experience_evidence, text)
+        if grounded is None:
+            extraction.experience_years = None
+            extraction.experience_evidence = None
+            _add_warning(extraction, "experience_ambiguous")
+        else:
+            extraction.experience_evidence = grounded
+
+    education = extraction.education
+    grounded_education = []
+    education_changed = False
+    for quote in education.evidence:
+        grounded = _ground_quote(quote, text)
+        if grounded is None:
+            education_changed = True
+        elif grounded not in grounded_education:
+            grounded_education.append(grounded)
+            education_changed |= grounded != quote
+    for field in ("degree", "major", "school", "graduation_year"):
+        value = getattr(education, field)
+        if not value:
+            continue
+        if any(_canonical(value) in _canonical(quote) for quote in grounded_education):
+            continue
+        candidates = [line for line in text.splitlines() if _canonical(value) in _canonical(line)]
+        if candidates:
+            quote = _bounded_line(min(candidates, key=len), value)
+            if quote not in grounded_education:
+                grounded_education.append(quote)
+            education_changed = True
+        else:
+            setattr(education, field, None)
+            education_changed = True
+    education.evidence = grounded_education[:20]
+    if education_changed:
+        _add_warning(extraction, "education_ambiguous")
+
     if truncated:
-        extraction.uncertain = True
-        if "resume_text_truncated" not in extraction.warnings:
-            extraction.warnings.append("resume_text_truncated")
+        _add_warning(extraction, "resume_text_truncated")
 
 
 def analyze_resume_text(text: str, settings) -> ResumeExtraction:
