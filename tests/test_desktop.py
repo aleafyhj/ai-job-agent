@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from app.boss_desktop import identity, main, run
+from app.boss_desktop import identity, main, preflight_report, run
 from app.desktop import Desktop, pixel, verify_target_image
 from app.desktop_report import ground_card, observe, verify_selection
 from app.vision import Box, Card, Requirement, Screen, TitleTarget, score
@@ -31,6 +31,24 @@ def test_coordinate_mapping_and_bounds():
     assert pixel((500, 250), (1920, 1080)) == (960, 270)
     with pytest.raises(ValueError):
         pixel((1001, 250), (1920, 1080))
+
+
+def test_preflight_is_read_only_and_reports_communication_readiness():
+    data = screen()
+    profile = {
+        "skills": [{"canonical_name": "Python", "evidence": "Python项目"}],
+        "facts": {"data_kind": "resume"},
+    }
+    policy = {"allowed_platforms": ["boss"], "auto_apply": True}
+    report = preflight_report(profile, policy, data, communicate=True, scroll_override=True)
+    assert report["passed"]
+    assert report["mode"] == "communication"
+    assert report["valid_card_count"] == 1
+
+    simulation = {**profile, "facts": {"data_kind": "simulation"}}
+    blocked = preflight_report(simulation, policy, data, communicate=True, scroll_override=True)
+    assert not blocked["passed"]
+    assert blocked["checks"]["real_profile"] is False
 
 
 def test_job_identity_normalizes_display_format_without_merging_other_districts():

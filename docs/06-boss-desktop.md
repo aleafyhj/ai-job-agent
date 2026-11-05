@@ -84,6 +84,14 @@ python -m app.boss_desktop click-card --card-index 2
 .\.venv\Scripts\python.exe -m app.boss_desktop run --profile-id PROFILE_UUID --policy-id POLICY_UUID --pages 3 --jobs 20
 ```
 
+真实运行前建议先执行只读检查；若计划启用立即沟通，同时传入 `--communicate`，它只检查策略和页面条件，不会产生鼠标输入：
+
+```powershell
+python -m app.boss_desktop preflight --profile-id PROFILE_UUID --policy-id POLICY_UUID --communicate
+```
+
+报告写入 `artifacts/boss-desktop/preflight.json`，包含真实/模拟档案、技能证据、BOSS 平台许可、自动沟通开关、页面可靠性、有效卡片和滚动区域七项结果。全部通过后，才使用相同档案和策略运行 `run --communicate`。
+
 原始 click 命令直接点击给定坐标，执行前自行确认目标；run 则使用模型识别坐标。模型坐标在原图上归一化为 0..1000，程序按实际截图宽高换算；不会把附件裁剪图坐标直接用到屏幕上。点击前重新截屏，图像变化则旧坐标作废并停止。动态广告/动画可能导致此项检查停止，需要保持页面稳定。
 
 卡片导航现改为：核对同一窗口句柄、窗口边界和屏幕尺寸，再严格比较目标标题附近 440×64 像素区域，忽略区域外时钟/广告等变化。目标区域变化或窗口移动仍停止；鼠标移动后再次核对窗口。原始坐标 click 和“立即沟通”仍使用整屏严格检查，本次仅调整可逆的职位切换操作。校验失败时保存 guard-current.png，便于与 screen.png 对比；此前旧版本没有保存失败时的新截图，无法据旧报告精确判断是哪部分发生了变化。

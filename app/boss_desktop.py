@@ -58,6 +58,30 @@ def has_card_identity(card):
     )
 
 
+def preflight_report(profile, policy, screen, *, communicate=False, scroll_override=False):
+    """Return a read-only readiness report; never perform desktop input."""
+    skills = profile.get("skills", [])
+    valid_cards = [card for card in screen.cards if has_card_identity(card)]
+    checks = {
+        "real_profile": not communicate
+        or profile.get("facts", {}).get("data_kind") != "simulation",
+        "skill_evidence": bool(skills)
+        and all(skill.get("canonical_name") and skill.get("evidence") for skill in skills),
+        "boss_allowed": "boss" in policy.get("allowed_platforms", []),
+        "communication_enabled": not communicate or bool(policy.get("auto_apply")),
+        "page_reliable": not screen.blocked and not screen.uncertain and not screen.list_loading,
+        "valid_cards": bool(valid_cards),
+        "list_scroll_ready": scroll_override or screen.list_scroll is not None,
+    }
+    return {
+        "passed": all(checks.values()),
+        "mode": "communication" if communicate else "read_only",
+        "checks": checks,
+        "card_count": len(screen.cards),
+        "valid_card_count": len(valid_cards),
+    }
+
+
 def scan_list(desktop, vision, root, args):
     folder = root / "runs" / uuid4().hex
     folder.mkdir(parents=True)
@@ -467,6 +491,7 @@ def main():
             "inspect",
             "click-card",
             "collect-detail",
+            "preflight",
             "run",
             "scan-list",
         ],
@@ -596,7 +621,7 @@ def main():
                 print("操作后截图:", after_path.resolve())
         else:
             if not args.profile_id or not args.policy_id or not settings.database_url:
-                raise ValueError("run 需要档案ID、策略ID和数据库连接")
+                raise ValueError("preflight/run 需要档案ID、策略ID和数据库连接")
             vision = Vision(settings)
             engine = make_engine(settings.database_url.get_secret_value())
             with Session(engine) as session:
@@ -606,6 +631,34 @@ def main():
                 policy = policy_read(
                     session, get_row(session, m.policies, args.policy_id)
                 ).model_dump(mode="json")
+            if args.action == "preflight":
+                image, _ = desktop.capture()
+                screen, _, observation = observe(
+                    vision,
+                    image,
+                    {"skills": profile["skills"]},
+                    "list",
+                    root,
+                )
+                report = preflight_report(
+                    profile,
+                    policy,
+                    screen,
+                    communicate=args.communicate,
+                    scroll_override=args.left_scroll is not None,
+                )
+                report["profile_id"] = str(args.profile_id)
+                report["policy_id"] = str(args.policy_id)
+                report["observation"] = str(observation.relative_to(root))
+                path = root / "preflight.json"
+                save_state(path, report)
+                print("运行前检查报告:", path.resolve())
+                print("检查结果:", "通过" if report["passed"] else "未通过")
+                if not report["passed"]:
+                    failed = [name for name, passed in report["checks"].items() if not passed]
+                    raise RuntimeError("运行前检查未通过: " + ", ".join(failed))
+                print("本命令只检查，不点击、不滚动、不沟通")
+                return
             if "boss" not in policy["allowed_platforms"]:
                 raise ValueError("策略未允许 BOSS直聘")
             if args.communicate and not policy["auto_apply"]:

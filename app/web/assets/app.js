@@ -1,6 +1,6 @@
 const state = {
   token: sessionStorage.getItem("jobAgentToken") || "",
-  profiles: [], policies: [], jobs: [], analyses: [],
+  profiles: [], policies: [], jobs: [], analyses: [], communications: [],
   selectedProfile: null, selectedJob: null, selectedAnalysis: null, profileEtag: null,
 };
 
@@ -54,19 +54,21 @@ async function loadAll() {
   if (!state.token) { $("#tokenDialog").showModal(); return; }
   $("#refreshButton").disabled = true;
   try {
-    const [profiles, policies, jobs, analyses] = await Promise.all([
+    const [profiles, policies, jobs, analyses, communications] = await Promise.all([
       api("/profiles?limit=100"), api("/policies?limit=100"),
-      api("/jobs?limit=100"), api("/analyses?limit=100"),
+      api("/jobs?limit=100"), api("/analyses?limit=100"), api("/communications?limit=100"),
     ]);
     state.profiles = profiles.data.items;
     state.policies = policies.data.items;
     state.jobs = jobs.data.items;
     state.analyses = analyses.data.items;
+    state.communications = communications.data.items;
     setConnected(true);
     metric("profile", state.profiles, profiles.data.next_cursor);
     metric("policy", state.policies, policies.data.next_cursor);
     metric("job", state.jobs, jobs.data.next_cursor);
     metric("analysis", state.analyses, analyses.data.next_cursor);
+    metric("communication", state.communications, communications.data.next_cursor);
     renderAll();
     $("#globalNotice").classList.add("hidden");
   } catch (error) {
@@ -101,6 +103,19 @@ function renderRecentAnalyses() {
       <span class="score ${scoreClass(item.score)}">${item.score === null ? "?" : Math.round(Number(item.score))}</span>
       <span class="grow"><strong>${esc(item.job_title)}</strong><small>${esc(item.company_name)} · ${esc(item.profile_name)}</small></span>
       ${analysisPill(item)}
+    </button>`).join("");
+}
+
+function renderRecentCommunications() {
+  const root = $("#recentCommunications");
+  if (!state.communications.length) { root.className = "stack-list empty-state compact"; root.textContent = "暂无立即沟通记录"; return; }
+  const labels = {pending: "待核查", confirmed: "已确认", unknown: "结果未知"};
+  root.className = "stack-list";
+  root.innerHTML = state.communications.slice(0, 8).map(item => `
+    <button class="list-row" data-communication-analysis="${esc(item.analysis_id)}" data-communication-job="${esc(item.job_id)}">
+      <span class="status-dot ${esc(item.status)}"></span>
+      <span class="grow"><strong>${esc(item.job_title)}</strong><small>${esc(item.company_name)} · ${esc(item.profile_name)} · ${date(item.attempted_at)}</small></span>
+      <span class="pill ${item.status === "unknown" ? "danger" : item.status === "pending" ? "warning" : ""}">${esc(labels[item.status] || item.status)}</span>
     </button>`).join("");
 }
 
@@ -180,7 +195,7 @@ function renderPolicies() {
   if (!state.policies.length) { root.className = "card-grid empty-state"; root.textContent = "暂无策略"; return; }
   root.className = "card-grid";
   root.innerHTML = state.policies.map(item => `
-    <article class="policy-card"><span class="pill ${item.auto_apply ? "warning" : "muted"}">${item.auto_apply ? "自动申请开启" : "仅分析"}</span><h3>${esc(item.name)}</h3>
+    <article class="policy-card"><span class="pill ${item.auto_apply ? "warning" : "muted"}">${item.auto_apply ? "自动沟通开启" : "仅分析"}</span><h3>${esc(item.name)}</h3>
       <div class="policy-stats"><div><strong>${esc(item.comparison === "gte" ? "≥" : ">")} ${esc(item.threshold)}</strong><small>匹配阈值</small></div><div><strong>${esc(item.daily_limit)}</strong><small>每日上限</small></div></div>
     </article>`).join("");
 }
@@ -315,7 +330,7 @@ async function reanalyzeAll() {
   button.disabled = false;
 }
 
-function renderAll() { renderRecentAnalyses(); renderProfiles(); renderPolicies(); renderJobs(); renderProfileDetail(); renderJobDetail(); }
+function renderAll() { renderRecentAnalyses(); renderRecentCommunications(); renderProfiles(); renderPolicies(); renderJobs(); renderProfileDetail(); renderJobDetail(); }
 
 async function filterAnalyses() {
   try {
@@ -341,6 +356,7 @@ document.addEventListener("click", event => {
   const job = event.target.closest("[data-job-id]"); if (job) selectJob(job.dataset.jobId);
   const analysis = event.target.closest("[data-analysis-id]"); if (analysis && !analysis.closest("form")) selectAnalysis(analysis.dataset.analysisId);
   const analysisJob = event.target.closest("[data-analysis-job]"); if (analysisJob) { showView("jobs"); selectJob(analysisJob.dataset.analysisJob); }
+  const communication = event.target.closest("[data-communication-analysis]"); if (communication) { showView("jobs"); selectJob(communication.dataset.communicationJob); selectAnalysis(communication.dataset.communicationAnalysis); }
   if (event.target.closest("[data-close-dialog]")) event.target.closest("dialog").close();
 });
 
